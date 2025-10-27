@@ -128,6 +128,10 @@ def sign_in_page() -> None:
     st.header("Education Sign-In")
     attendees = load_attendees()
 
+    recent_success = st.session_state.pop("sign_in_success", None)
+    if recent_success:
+        st.success(f"Thank you, {recent_success}! Your sign-in has been recorded.")
+
     if attendees.empty:
         st.warning(
             "No attendee list available. Please contact the admin to upload one."
@@ -189,11 +193,8 @@ def sign_in_page() -> None:
                 row_records = filtered_records[start : start + columns_per_row]
                 row_cols = st.columns(len(row_records))
                 for idx, (col, record) in enumerate(zip(row_cols, row_records)):
-                    name_line = record.get("name") or "Unnamed attendee"
-                    extra_lines = [
-                        value for value in (record.get("company"), record.get("email")) if value
-                    ]
-                    button_label = "\n".join([name_line] + extra_lines)
+                        name_line = record.get("name") or "Unnamed attendee"
+                    button_label = name_line
                     unique_fragment = (
                         record.get("attendee_id")
                         or record.get("email")
@@ -207,14 +208,7 @@ def sign_in_page() -> None:
 
         selected_attendee = st.session_state.get("selected_attendee")
         if selected_attendee:
-            company_suffix = (
-                f" ({selected_attendee['company']})"
-                if selected_attendee.get("company")
-                else ""
-            )
-            st.success(
-                f"Selected: {selected_attendee.get('name', 'Unknown attendee')}{company_suffix}"
-            )
+            st.info(f"Selected: {selected_attendee.get('name', 'Unknown attendee')}")
             attendee_id = selected_attendee.get("attendee_id", "")
             name = selected_attendee.get("name", "")
             company = selected_attendee.get("company", "")
@@ -272,9 +266,12 @@ def sign_in_page() -> None:
             "signature_file": signature_path,
         }
         append_signin(entry)
-
-        st.success("Thank you! Your sign-in has been recorded.")
+        st.session_state.pop("selected_attendee", None)
+        if "attendee_search" in st.session_state:
+            st.session_state["attendee_search"] = ""
         st.session_state.pop("signature_canvas", None)
+        st.session_state["sign_in_success"] = entry["name"]
+        st.rerun()
 
 
 def admin_login_page() -> None:
