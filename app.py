@@ -193,7 +193,7 @@ def sign_in_page() -> None:
                 row_records = filtered_records[start : start + columns_per_row]
                 row_cols = st.columns(len(row_records))
                 for idx, (col, record) in enumerate(zip(row_cols, row_records)):
-                        name_line = record.get("name") or "Unnamed attendee"
+                    name_line = record.get("name") or "Unnamed attendee"
                     button_label = name_line
                     unique_fragment = (
                         record.get("attendee_id")
@@ -202,7 +202,9 @@ def sign_in_page() -> None:
                         or f"{start}_{idx}"
                     )
                     button_key = f"attendee_btn_{unique_fragment}_{start}_{idx}"
-                    if col.button(button_label, key=button_key, use_container_width=True):
+                    if col.button(
+                        button_label, key=button_key, use_container_width=True
+                    ):
                         st.session_state["selected_attendee"] = record
                         selected_attendee = record
 
