@@ -149,6 +149,9 @@ def sign_in_page() -> None:
     email = ""
 
     if use_existing:
+        if st.session_state.pop("reset_attendee_search", False):
+            st.session_state.pop("attendee_search", None)
+
         selected_attendee = st.session_state.get("selected_attendee")
         search_query = st.text_input(
             "Search for your name, company, or email",
@@ -217,8 +220,7 @@ def sign_in_page() -> None:
             email = selected_attendee.get("email", "")
     else:
         st.session_state.pop("selected_attendee", None)
-        if "attendee_search" in st.session_state:
-            st.session_state["attendee_search"] = ""
+        st.session_state.pop("attendee_search", None)
 
     name = st.text_input("Full name*", value=name)
     company = st.text_input("Company", value=company)
@@ -269,10 +271,9 @@ def sign_in_page() -> None:
         }
         append_signin(entry)
         st.session_state.pop("selected_attendee", None)
-        if "attendee_search" in st.session_state:
-            st.session_state["attendee_search"] = ""
         st.session_state.pop("signature_canvas", None)
         st.session_state["sign_in_success"] = entry["name"]
+        st.session_state["reset_attendee_search"] = True
         st.rerun()
 
 
