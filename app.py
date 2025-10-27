@@ -229,6 +229,10 @@ def sign_in_page() -> None:
     st.markdown("#### Signature")
     st.caption("Please sign inside the box below.")
 
+    if "signature_canvas_key" not in st.session_state:
+        st.session_state["signature_canvas_key"] = f"signature_canvas_{uuid.uuid4().hex}"
+    canvas_key = st.session_state["signature_canvas_key"]
+
     canvas_result = st_canvas(
         fill_color="#FFFFFF",
         stroke_width=2,
@@ -237,7 +241,7 @@ def sign_in_page() -> None:
         height=200,
         width=600,
         drawing_mode="freedraw",
-        key="signature_canvas",
+        key=canvas_key,
     )
 
     submitted = st.button("Submit sign-in", type="primary")
@@ -271,9 +275,11 @@ def sign_in_page() -> None:
         }
         append_signin(entry)
         st.session_state.pop("selected_attendee", None)
-        st.session_state.pop("signature_canvas", None)
         st.session_state["sign_in_success"] = entry["name"]
         st.session_state["reset_attendee_search"] = True
+        st.session_state["signature_canvas_key"] = (
+            f"signature_canvas_{uuid.uuid4().hex}"
+        )
         st.rerun()
 
 
