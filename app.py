@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 import os
+import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -14,10 +16,13 @@ from streamlit_drawable_canvas import st_canvas
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-SIGNATURE_DIR = DATA_DIR / "signatures"
-ATTENDEE_FILE = DATA_DIR / "attendees.csv"
-SIGNIN_FILE = DATA_DIR / "signins.csv"
+EVENTS_DIR = DATA_DIR / "events"
+EVENTS_FILE = DATA_DIR / "events.csv"
+LEGACY_ATTENDEE_FILE = DATA_DIR / "attendees.csv"
+LEGACY_SIGNIN_FILE = DATA_DIR / "signins.csv"
+LEGACY_SIGNATURE_DIR = DATA_DIR / "signatures"
 
+EVENT_COLUMNS = ["event_id", "name", "description"]
 ATTENDEE_COLUMNS = ["attendee_id", "name", "company", "email"]
 SIGNIN_COLUMNS = [
     "record_id",
@@ -31,6 +36,30 @@ SIGNIN_COLUMNS = [
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "step")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "step")
+
+DEFAULT_EVENT_ID = "default"
+DEFAULT_EVENT_NAME = "Education Session"
+
+
+def event_dir(event_id: str) -> Path:
+    return EVENTS_DIR / event_id
+
+
+def attendee_file(event_id: str) -> Path:
+    return event_dir(event_id) / "attendees.csv"
+
+
+def signin_file(event_id: str) -> Path:
+    return event_dir(event_id) / "signins.csv"
+
+
+def signature_dir(event_id: str) -> Path:
+    return event_dir(event_id) / "signatures"
+
+
+def slugify(value: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return base or uuid.uuid4().hex[:8]
 
 
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
@@ -51,18 +80,77 @@ def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
 def ensure_storage() -> None:
     """Create required data folders/files if they do not yet exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SIGNATURE_DIR.mkdir(parents=True, exist_ok=True)
-    if not ATTENDEE_FILE.exists():
-        pd.DataFrame(columns=ATTENDEE_COLUMNS).to_csv(ATTENDEE_FILE, index=False)
-    if not SIGNIN_FILE.exists():
-        pd.DataFrame(columns=SIGNIN_COLUMNS).to_csv(SIGNIN_FILE, index=False)
+    EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not EVENTS_FILE.exists():
+        pd.DataFrame(
+            [
+                {
+                    "event_id": DEFAULT_EVENT_ID,
+                    "name": DEFAULT_EVENT_NAME,
+                    "description": "",
+                }
+            ],
+            columns=EVENT_COLUMNS,
+        ).to_csv(EVENTS_FILE, index=False)
+
+    events_df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    missing = [col for col in EVENT_COLUMNS if col not in events_df.columns]
+    if missing:
+        for col in missing:
+            events_df[col] = ""
+    events_df = events_df[EVENT_COLUMNS]
+    events_df.to_csv(EVENTS_FILE, index=False)
+
+    for event_id in events_df["event_id"]:
+        ensure_event_storage(event_id)
+
+    # Legacy data migration (single-session layout -> default event)
+    default_attendee_path = attendee_file(DEFAULT_EVENT_ID)
+    default_signin_path = signin_file(DEFAULT_EVENT_ID)
+    default_signature_path = signature_dir(DEFAULT_EVENT_ID)
+
+    if LEGACY_ATTENDEE_FILE.exists() and not default_attendee_path.exists():
+        shutil.copy(LEGACY_ATTENDEE_FILE, default_attendee_path)
+    if LEGACY_SIGNIN_FILE.exists() and not default_signin_path.exists():
+        shutil.copy(LEGACY_SIGNIN_FILE, default_signin_path)
+    if LEGACY_SIGNATURE_DIR.exists() and not any(default_signature_path.iterdir()):
+        for legacy_file in LEGACY_SIGNATURE_DIR.glob("*.png"):
+            shutil.copy(legacy_file, default_signature_path / legacy_file.name)
+
+
+def ensure_event_storage(event_id: str) -> None:
+    path = event_dir(event_id)
+    path.mkdir(parents=True, exist_ok=True)
+
+    attendees_path = attendee_file(event_id)
+    signins_path = signin_file(event_id)
+    signatures_path = signature_dir(event_id)
+
+    if not attendees_path.exists():
+        pd.DataFrame(columns=ATTENDEE_COLUMNS).to_csv(attendees_path, index=False)
+    if not signins_path.exists():
+        pd.DataFrame(columns=SIGNIN_COLUMNS).to_csv(signins_path, index=False)
+    signatures_path.mkdir(parents=True, exist_ok=True)
 
 
 @st.cache_data(show_spinner=False)
-def load_attendees() -> pd.DataFrame:
-    if not ATTENDEE_FILE.exists():
+def load_events() -> pd.DataFrame:
+    if not EVENTS_FILE.exists():
+        ensure_storage()
+    df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    missing = [col for col in EVENT_COLUMNS if col not in df.columns]
+    if missing:
+        raise ValueError(f"Events file missing required columns: {', '.join(missing)}")
+    return df[EVENT_COLUMNS]
+
+
+@st.cache_data(show_spinner=False)
+def load_attendees(event_id: str) -> pd.DataFrame:
+    file_path = attendee_file(event_id)
+    if not file_path.exists():
         return pd.DataFrame(columns=ATTENDEE_COLUMNS)
-    df = pd.read_csv(ATTENDEE_FILE, dtype=str).fillna("")
+    df = pd.read_csv(file_path, dtype=str).fillna("")
     missing = [col for col in ATTENDEE_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(
@@ -72,35 +160,77 @@ def load_attendees() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_signins() -> pd.DataFrame:
-    if not SIGNIN_FILE.exists():
+def load_signins(event_id: str) -> pd.DataFrame:
+    file_path = signin_file(event_id)
+    if not file_path.exists():
         return pd.DataFrame(columns=SIGNIN_COLUMNS)
-    df = pd.read_csv(SIGNIN_FILE, dtype=str).fillna("")
+    df = pd.read_csv(file_path, dtype=str).fillna("")
     missing = [col for col in SIGNIN_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(f"Sign-in CSV missing required columns: {', '.join(missing)}")
     return df[SIGNIN_COLUMNS]
 
 
-def append_signin(entry: dict[str, str]) -> None:
-    df = load_signins()
+def write_events(df: pd.DataFrame) -> None:
+    df = df.astype(str).fillna("")
+    df = df[EVENT_COLUMNS]
+    df.to_csv(EVENTS_FILE, index=False)
+    load_events.clear()
+
+
+def create_event(name: str, description: str = "") -> dict[str, str]:
+    events = load_events()
+    existing_ids = set(events["event_id"])
+
+    base_slug = slugify(name)
+    candidate = base_slug or DEFAULT_EVENT_ID
+    suffix = 1
+    while candidate in existing_ids:
+        candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+
+    event_id = candidate
+    record = {
+        "event_id": event_id,
+        "name": name or f"Session {len(events) + 1}",
+        "description": description,
+    }
+    updated = pd.concat([events, pd.DataFrame([record])], ignore_index=True)
+    write_events(updated)
+    ensure_event_storage(event_id)
+    return record
+
+
+def update_event_details(event_id: str, name: str, description: str) -> None:
+    events = load_events()
+    if event_id not in events["event_id"].values:
+        raise ValueError(f"Event '{event_id}' does not exist.")
+    events.loc[events["event_id"] == event_id, ["name", "description"]] = [
+        name,
+        description,
+    ]
+    write_events(events)
+
+
+def append_signin(event_id: str, entry: dict[str, str]) -> None:
+    df = load_signins(event_id)
     df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
-    df.to_csv(SIGNIN_FILE, index=False)
+    df.to_csv(signin_file(event_id), index=False)
     load_signins.clear()
 
 
-def replace_attendees(new_df: pd.DataFrame) -> None:
+def replace_attendees(event_id: str, new_df: pd.DataFrame) -> None:
     new_df = new_df.astype(str).fillna("")
     missing = [col for col in ATTENDEE_COLUMNS if col not in new_df.columns]
     if missing:
         raise ValueError(
             f"Uploaded attendee list missing required columns: {', '.join(missing)}"
         )
-    new_df.to_csv(ATTENDEE_FILE, index=False)
+    new_df.to_csv(attendee_file(event_id), index=False)
     load_attendees.clear()
 
 
-def save_signature_image(image_data: np.ndarray) -> str:
+def save_signature_image(event_id: str, image_data: np.ndarray) -> str:
     """Persist the signature image and return its relative path."""
     if image_data is None:
         raise ValueError("No signature data to save.")
@@ -110,7 +240,9 @@ def save_signature_image(image_data: np.ndarray) -> str:
     composed = Image.alpha_composite(background, image).convert("RGB")
 
     file_id = uuid.uuid4().hex
-    file_path = SIGNATURE_DIR / f"{file_id}.png"
+    signature_path = signature_dir(event_id)
+    signature_path.mkdir(parents=True, exist_ok=True)
+    file_path = signature_path / f"{file_id}.png"
     composed.save(file_path, format="PNG")
     relative_path = file_path.relative_to(BASE_DIR)
     return relative_path.as_posix()
@@ -124,17 +256,19 @@ def is_signature_blank(image_data: np.ndarray | None) -> bool:
     return np.all(rgb_pixels == 255)
 
 
-def sign_in_page() -> None:
-    st.header("Education Sign-In")
-    attendees = load_attendees()
+def sign_in_page(event_id: str, event_name: str) -> None:
+    st.header(f"Education Sign-In — {event_name}")
+    attendees = load_attendees(event_id)
 
     recent_success = st.session_state.pop("sign_in_success", None)
     if recent_success:
-        st.success(f"Thank you, {recent_success}! Your sign-in has been recorded.")
+        st.success(
+            f"Thank you, {recent_success}! You are signed in for {event_name}."
+        )
 
     if attendees.empty:
         st.warning(
-            "No attendee list available. Please contact the admin to upload one."
+            "No attendee list found for this session. Please contact the admin to upload one."
         )
         return
 
@@ -259,7 +393,7 @@ def sign_in_page() -> None:
             return
 
         try:
-            signature_path = save_signature_image(canvas_result.image_data)
+            signature_path = save_signature_image(event_id, canvas_result.image_data)
         except ValueError as exc:
             st.error(str(exc))
             return
@@ -273,7 +407,7 @@ def sign_in_page() -> None:
             "signed_at": datetime.now(timezone.utc).isoformat(),
             "signature_file": signature_path,
         }
-        append_signin(entry)
+        append_signin(event_id, entry)
         st.session_state.pop("selected_attendee", None)
         st.session_state["sign_in_success"] = entry["name"]
         st.session_state["reset_attendee_search"] = True
@@ -304,14 +438,16 @@ def admin_login_page() -> None:
             st.error("Invalid credentials. Please try again.")
 
 
-def admin_page() -> None:
-    st.header("Admin Panel")
+def admin_page(
+    event_id: str, events_df: pd.DataFrame, active_event: dict[str, str]
+) -> None:
+    st.header(f"Admin Panel — {active_event.get('name') or event_id}")
     st.caption(
-        "Upload attendee lists, monitor sign-ins, and export data for certificates."
+        "Manage attendee lists, monitor sign-ins, and download data for certificates."
     )
 
-    attendees = load_attendees()
-    signins = load_signins()
+    attendees = load_attendees(event_id)
+    signins = load_signins(event_id)
 
     col1, col2 = st.columns(2)
     col1.metric("Registered attendees", len(attendees))
@@ -323,6 +459,26 @@ def admin_page() -> None:
     with st.expander("Sign-in records", expanded=False):
         st.dataframe(signins)
 
+    st.subheader("Session details")
+    with st.form("update_event_details"):
+        updated_name = st.text_input(
+            "Education name", value=active_event.get("name", ""), max_chars=200
+        )
+        updated_description = st.text_area(
+            "Description (optional)",
+            value=active_event.get("description", ""),
+            height=100,
+        )
+        save_details = st.form_submit_button("Save details")
+    if save_details:
+        try:
+            update_event_details(event_id, updated_name.strip(), updated_description.strip())
+            st.success("Session details saved.")
+            st.session_state["active_event_id"] = event_id
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Could not update session details: {exc}")
+
     st.subheader("Replace attendee list")
     uploaded_file = st.file_uploader(
         "Upload CSV with columns: attendee_id, name, company, email", type=["csv"]
@@ -330,7 +486,7 @@ def admin_page() -> None:
     if uploaded_file is not None:
         try:
             new_df = pd.read_csv(uploaded_file, dtype=str).fillna("")
-            replace_attendees(new_df)
+            replace_attendees(event_id, new_df)
             st.success("Attendee list updated successfully.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001 (streamlit feedback)
@@ -341,7 +497,7 @@ def admin_page() -> None:
     st.download_button(
         "Download sign-ins as CSV",
         data=signins_csv,
-        file_name=f"signins-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+        file_name=f"{event_id}-signins-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
         mime="text/csv",
     )
 
@@ -349,10 +505,26 @@ def admin_page() -> None:
         "Clear sign-in records",
         help="Use at the start of a new education session.",
     ):
-        pd.DataFrame(columns=SIGNIN_COLUMNS).to_csv(SIGNIN_FILE, index=False)
+        pd.DataFrame(columns=SIGNIN_COLUMNS).to_csv(signin_file(event_id), index=False)
         load_signins.clear()
         st.success("Sign-in records cleared.")
         st.rerun()
+
+    st.subheader("Create new education session")
+    with st.form("create_event_form"):
+        new_event_name = st.text_input("New session name", placeholder="e.g. Python Basics")
+        new_event_description = st.text_area(
+            "Description (optional)", placeholder="Short note about this education."
+        )
+        create_pressed = st.form_submit_button("Create session")
+    if create_pressed:
+        try:
+            record = create_event(new_event_name.strip(), new_event_description.strip())
+            st.success(f"Created new session: {record['name'] or record['event_id']}")
+            st.session_state["active_event_id"] = record["event_id"]
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Could not create session: {exc}")
 
     if st.button("Log out"):
         st.session_state["admin_authenticated"] = False
@@ -369,14 +541,45 @@ def main() -> None:
     if "admin_authenticated" not in st.session_state:
         st.session_state["admin_authenticated"] = False
 
+    events_df = load_events()
+    event_records = events_df.to_dict("records")
+    event_lookup = {row["event_id"]: row for row in event_records}
+
+    if not event_records:
+        st.error("No education sessions available. Please create one in the admin panel.")
+        return
+
+    active_event_id = st.session_state.get("active_event_id")
+    if active_event_id not in event_lookup:
+        active_event_id = event_records[0]["event_id"]
+        st.session_state["active_event_id"] = active_event_id
+
+    event_ids = [row["event_id"] for row in event_records]
+    default_index = event_ids.index(active_event_id)
+    selected_event_id = st.sidebar.selectbox(
+        "Education session",
+        event_ids,
+        index=default_index,
+        format_func=lambda eid: event_lookup[eid].get("name") or eid,
+        key="event_selector",
+    )
+    if selected_event_id != active_event_id:
+        st.session_state["active_event_id"] = selected_event_id
+        st.session_state.pop("selected_attendee", None)
+        st.session_state["reset_attendee_search"] = True
+    active_event = event_lookup[selected_event_id]
+
+    if active_event.get("description"):
+        st.sidebar.caption(active_event["description"])
+
     page = st.sidebar.radio("Navigation", ["Sign In", "Admin"])
     if page == "Admin":
         if st.session_state.get("admin_authenticated", False):
-            admin_page()
+            admin_page(selected_event_id, events_df, active_event)
         else:
             admin_login_page()
     else:
-        sign_in_page()
+        sign_in_page(selected_event_id, active_event.get("name") or selected_event_id)
 
 
 if __name__ == "__main__":
