@@ -6,12 +6,15 @@ import os
 import re
 import shutil
 from pathlib import Path
+import io
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
+from docx import Document
+from docx.shared import Inches
 
 
 BASE_DIR = Path(__file__).parent
@@ -331,6 +334,53 @@ def append_signin(event_id: str, entry: dict[str, str]) -> None:
     df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
     df.to_csv(signin_file(event_id), index=False)
     load_signins.clear()
+
+
+def generate_signature_document(event_id: str) -> tuple[str, bytes]:
+    template_path = ASSETS_DIR / "SignatureList.docx"
+    if not template_path.exists():
+        raise FileNotFoundError("Signature template not found in assets directory.")
+
+    signins = load_signins(event_id).copy()
+    if signins.empty:
+        raise ValueError("No sign-in records available for this session.")
+
+    if "signed_at" in signins.columns:
+        signins = signins.sort_values(
+            by="signed_at", ascending=True, na_position="last"
+        )
+
+    document = Document(template_path)
+    table = document.tables[0]
+
+    header_offset = 1
+    required_rows = header_offset + len(signins)
+    while len(table.rows) < required_rows:
+        table.add_row()
+
+    for idx, (_, row) in enumerate(signins.iterrows(), start=1):
+        table_row = table.rows[idx]
+        table_row.cells[0].text = str(idx)
+        table_row.cells[1].text = row.get("name", "")
+        table_row.cells[2].text = row.get("company", "")
+
+        signature_cell = table_row.cells[3]
+        signature_cell.text = ""
+        signature_path_str = row.get("signature_file", "")
+        signature_path = BASE_DIR / signature_path_str if signature_path_str else None
+        if signature_path and signature_path.exists():
+            run = signature_cell.paragraphs[0].add_run()
+            run.add_picture(str(signature_path), width=Inches(1.5))
+
+    for idx in range(required_rows, len(table.rows)):
+        for cell in table.rows[idx].cells:
+            cell.text = ""
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    filename = f"{event_id}-signature-list.docx"
+    return filename, buffer.getvalue()
 
 
 def replace_attendees(event_id: str, new_df: pd.DataFrame) -> None:
@@ -781,6 +831,28 @@ def admin_page(
         file_name=f"{event_id}-signins-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
         mime="text/csv",
     )
+
+    template_path = ASSETS_DIR / "SignatureList.docx"
+    if template_path.exists():
+        if signins.empty:
+            st.caption("Collect sign-ins to enable the signature sheet download.")
+        else:
+            try:
+                doc_filename, doc_bytes = generate_signature_document(event_id)
+                st.download_button(
+                    "Download signature sheet (DOCX)",
+                    data=doc_bytes,
+                    file_name=doc_filename,
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Unable to generate signature sheet: {exc}")
+    else:
+        st.caption(
+            "SignatureList.docx not found in assets directory. Upload it to enable document export."
+        )
 
     if st.button(
         "Clear sign-in records",

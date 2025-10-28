@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from PIL import Image
+from docx import Document
 
 import app
 
@@ -18,7 +19,9 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "BASE_DIR", base_dir)
     monkeypatch.setattr(app, "DATA_DIR", data_dir)
     monkeypatch.setattr(app, "EVENTS_DIR", events_dir)
-    monkeypatch.setattr(app, "ASSETS_DIR", base_dir / "assets")
+    assets_dir = base_dir / "assets"
+    assets_dir.mkdir()
+    monkeypatch.setattr(app, "ASSETS_DIR", assets_dir)
     monkeypatch.setattr(app, "EVENTS_FILE", data_dir / "events.csv")
     monkeypatch.setattr(app, "LEGACY_ATTENDEE_FILE", data_dir / "attendees.csv")
     monkeypatch.setattr(app, "LEGACY_SIGNIN_FILE", data_dir / "signins.csv")
@@ -31,6 +34,17 @@ def isolated_storage(tmp_path, monkeypatch):
             pass
 
     app.ensure_storage()
+
+    template_doc = Document()
+    table = template_doc.add_table(rows=14, cols=4)
+    header = table.rows[0].cells
+    header[0].text = "#"
+    header[1].text = "Name and Surname"
+    header[2].text = "Organization"
+    header[3].text = "Signature"
+    for idx in range(1, 14):
+        table.rows[idx].cells[0].text = str(idx)
+    template_doc.save(assets_dir / "SignatureList.docx")
     yield
 
     for cached in (app.load_events, app.load_attendees, app.load_signins):
@@ -243,3 +257,20 @@ def test_append_signin_appends_to_event_csv():
     stored = read_csv(app.signin_file(event_id))
     assert len(stored) == 1
     assert stored.iloc[0]["record_id"] == "abc123"
+
+
+def test_generate_signature_document_returns_bytes():
+    event_id = app.DEFAULT_EVENT_ID
+    entry = {
+        "record_id": "xyz789",
+        "attendee_id": "3",
+        "name": "Bob Signed",
+        "company": "SignCo",
+        "email": "bob@sign.co",
+        "signed_at": "2024-05-01T09:00:00Z",
+        "signature_file": "",
+    }
+    app.append_signin(event_id, entry)
+    filename, data = app.generate_signature_document(event_id)
+    assert filename.endswith(".docx")
+    assert len(data) > 0
