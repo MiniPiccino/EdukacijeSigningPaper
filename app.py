@@ -67,7 +67,7 @@ PROJECT_TEMPLATES = {
     "INNO2MARE": {
         "tagline": "INNO2MARE project – 101087348 – funded by Horizon Europe",
         "description": "Empowering maritime regions through innovation and collaboration.",
-        "image": "assets/image.png",
+        "image": "assets/eu-funded.png",
     },
     "EDIH": {
         "tagline": "European Digital Innovation Hub activities",
@@ -357,7 +357,7 @@ def is_signature_blank(image_data: np.ndarray | None) -> bool:
 
 def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     event_name = event.get("name") or event_id
-    st.header(f"Education Sign-In — {event_name}")
+    st.header(f"Education Sign-In - {event_name}")
     attendees = load_attendees(event_id)
 
     recent_success = st.session_state.pop("sign_in_success", None)
@@ -381,35 +381,33 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     )
 
     declaration_text = event.get("declaration") or DECLARATION_PLACEHOLDER
-    st.markdown("**Declaration**")
-    st.info(declaration_text)
-
     project_type = event.get("project_type", "")
     template = get_project_template(project_type)
-    if project_type == "INNO2MARE" and template.get("tagline"):
-        st.markdown(f"**{template['tagline']}**")
-    if template.get("description"):
-        st.caption(template["description"])
 
-    if project_type == "INNO2MARE":
-        image_path = BASE_DIR / template.get("image", "")
-        if image_path.exists():
-            st.image(
-                image_path,
-                caption="Funded by the European Union",
-                use_column_width=False,
-            )
-        else:
-            st.warning(
-                f"Project image '{template.get('image')}' is missing. "
-                "Upload the asset under the repository's assets folder."
-            )
-    st.divider()
+    def render_footer() -> None:
+        st.divider()
+        st.markdown("**Declaration**")
+        st.info(declaration_text)
+        if project_type == "INNO2MARE":
+            if template.get("tagline"):
+                st.markdown(f"**{template['tagline']}**")
+            if template.get("description"):
+                st.caption(template["description"])
+            image_path = BASE_DIR / template.get("image", "")
+            if image_path.exists():
+                st.image(image_path, use_container_width=True)
+            else:
+                st.warning(
+                    f"Project image '{template.get('image')}' is missing. "
+                    "Upload the asset under the repository's assets folder."
+                )
+            st.caption("Funded by the European Union")
 
     if attendees.empty:
         st.warning(
             "No attendee list found for this session. Please contact the admin to upload one."
         )
+        render_footer()
         return
 
     use_existing = st.toggle(
@@ -558,6 +556,8 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
             f"signature_canvas_{uuid.uuid4().hex}"
         )
         st.rerun()
+
+    render_footer()
 
 
 def admin_login_page() -> None:
