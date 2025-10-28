@@ -67,22 +67,22 @@ PROJECT_TEMPLATES = {
     "INNO2MARE": {
         "tagline": "INNO2MARE project – 101087348 – funded by Horizon Europe",
         "description": "Empowering maritime regions through innovation and collaboration.",
-        "image": "assets/eu-funded.png",
+        "image": "assets/image.png",
     },
     "EDIH": {
         "tagline": "European Digital Innovation Hub activities",
         "description": "Supporting SMEs on their digital transformation journey.",
-        "image": "assets/eu-funded.png",
+        "image": "assets/image.png",
     },
     "EEN": {
         "tagline": "Enterprise Europe Network initiatives",
         "description": "Connecting businesses to grow on an international scale.",
-        "image": "assets/eu-funded.png",
+        "image": "assets/image.png",
     },
     "GREENPACT": {
         "tagline": "GREENPACT sustainability programme",
         "description": "Advancing green and sustainable business practices.",
-        "image": "assets/eu-funded.png",
+        "image": "assets/image.png",
     },
 }
 
@@ -577,10 +577,40 @@ def admin_login_page() -> None:
 def admin_page(
     event_id: str, events_df: pd.DataFrame, active_event: dict[str, str]
 ) -> None:
-    st.header(f"Admin Panel — {active_event.get('name') or event_id}")
+    st.header(f"Admin Panel - {active_event.get('name') or event_id}")
     st.caption(
         "Manage attendee lists, monitor sign-ins, and download data for certificates."
     )
+
+    events_df = load_events()
+    event_ids = list(events_df["event_id"])
+    if event_id not in event_ids:
+        event_id = event_ids[0]
+        st.session_state["active_event_id"] = event_id
+
+    labels_by_id = {
+        row["event_id"]: f"{row['name'] or row['event_id']} - {row['date'] or 'Date TBD'}"
+        for _, row in events_df.iterrows()
+    }
+    default_index = event_ids.index(event_id)
+
+    st.subheader("Education sessions")
+    selected_for_edit = st.radio(
+        "Choose a session to edit",
+        event_ids,
+        index=default_index,
+        format_func=lambda eid: labels_by_id[eid],
+        key="admin_event_radio",
+    )
+    if selected_for_edit != event_id:
+        st.session_state["active_event_id"] = selected_for_edit
+        st.session_state["reset_attendee_search"] = True
+        st.session_state.pop("selected_attendee", None)
+        st.session_state.pop("signature_canvas_key", None)
+        st.rerun()
+
+    event_id = selected_for_edit
+    active_event = events_df.set_index("event_id").loc[event_id].to_dict()
 
     attendees = load_attendees(event_id)
     signins = load_signins(event_id)
@@ -743,10 +773,6 @@ def admin_page(
             placeholder="Internal notes about this education (not shown to attendees).",
             height=80,
         )
-        new_attendees_file = st.file_uploader(
-            "Attendee list CSV* (columns: attendee_id, name, company, email)",
-            type=["csv"],
-        )
         create_pressed = st.form_submit_button("Create session")
     if create_pressed:
         required_values = {
@@ -758,37 +784,30 @@ def admin_page(
             "Declaration text": new_event_declaration.strip(),
         }
         missing = [label for label, value in required_values.items() if not value]
-        if new_attendees_file is None:
-            missing.append("Attendee list CSV")
 
         if missing:
             st.error(f"Please provide: {', '.join(missing)}.")
         else:
             try:
-                attendees_df = pd.read_csv(new_attendees_file, dtype=str).fillna("")
+                record = create_event(
+                    new_event_name.strip(),
+                    new_event_date.strip(),
+                    new_event_location.strip(),
+                    new_event_project_activity.strip(),
+                    new_event_project_type.strip(),
+                    new_event_declaration.strip(),
+                    new_event_description.strip(),
+                )
+                st.success(
+                    f"Created new session: {record['name'] or record['event_id']}"
+                )
+                st.session_state["active_event_id"] = record["event_id"]
+                st.session_state["reset_attendee_search"] = True
+                st.session_state.pop("selected_attendee", None)
+                st.session_state.pop("signature_canvas_key", None)
+                st.rerun()
             except Exception as exc:  # noqa: BLE001
-                st.error(f"Could not read attendee list: {exc}")
-            else:
-                try:
-                    record = create_event(
-                        new_event_name.strip(),
-                        new_event_date.strip(),
-                        new_event_location.strip(),
-                        new_event_project_activity.strip(),
-                        new_event_project_type.strip(),
-                        new_event_declaration.strip(),
-                        new_event_description.strip(),
-                    )
-                    replace_attendees(record["event_id"], attendees_df)
-                    st.success(
-                        f"Created new session: {record['name'] or record['event_id']}"
-                    )
-                    st.session_state["active_event_id"] = record["event_id"]
-                    st.session_state["reset_attendee_search"] = True
-                    st.session_state.pop("selected_attendee", None)
-                    st.rerun()
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"Could not create session: {exc}")
+                st.error(f"Could not create session: {exc}")
 
     if st.button("Log out"):
         st.session_state["admin_authenticated"] = False
