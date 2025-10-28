@@ -55,6 +55,7 @@ def test_ensure_storage_creates_default_event():
     default_row = events.loc[events["event_id"] == app.DEFAULT_EVENT_ID].iloc[0]
     assert default_row["declaration"] == app.DECLARATION_PLACEHOLDER
     assert default_row["project_type"] == app.PROJECT_TYPES[0]
+    assert default_row["is_default"] == "true"
 
     default_attendees = read_csv(app.attendee_file(app.DEFAULT_EVENT_ID))
     default_signins = read_csv(app.signin_file(app.DEFAULT_EVENT_ID))
@@ -120,6 +121,7 @@ def test_create_event_generates_unique_directory():
     assert created_row["date"] == "2024-11-01"
     assert created_row["declaration"] == "Custom declaration text"
     assert created_row["project_type"] == "GREENPACT"
+    assert created_row["is_default"] == "false"
 
 
 def test_update_event_details_overwrites_fields():
@@ -148,6 +150,24 @@ def test_update_event_details_overwrites_fields():
     assert row["location"] == "City B"
     assert row["project_activity"] == "Module B"
     assert row["project_type"] == "EEN"
+    assert row["is_default"] == "false"
+
+
+def test_set_default_event_updates_flags():
+    record = app.create_event(
+        name="Session Default",
+        date="2024-12-01",
+        location="Main Hall",
+        project_activity="Workshop",
+        project_type="INNO2MARE",
+        declaration="Custom declaration text",
+        description="Notes",
+    )
+    app.set_default_event(record["event_id"])
+    events = read_csv(app.EVENTS_FILE)
+    defaults = events[events["is_default"] == "true"]
+    assert len(defaults) == 1
+    assert defaults.iloc[0]["event_id"] == record["event_id"]
 
 
 def test_filter_attendees_matches_by_partial_text():

@@ -30,6 +30,7 @@ EVENT_COLUMNS = [
     "location",
     "project_activity",
     "project_type",
+    "is_default",
     "declaration",
     "description",
 ]
@@ -63,6 +64,7 @@ DECLARATION_PLACEHOLDER = (
 )
 
 PROJECT_TYPES = ["INNO2MARE", "EDIH", "EEN", "GREENPACT"]
+INNO2MARE_LOGO_WIDTH = 220
 PROJECT_TEMPLATES = {
     "INNO2MARE": {
         "tagline": "INNO2MARE project – 101087348 – funded by Horizon Europe",
@@ -143,6 +145,7 @@ def ensure_storage() -> None:
                     "location": "",
                     "project_activity": "",
                     "project_type": PROJECT_TYPES[0],
+                    "is_default": "true",
                     "declaration": DECLARATION_PLACEHOLDER,
                     "description": "",
                 }
@@ -156,6 +159,7 @@ def ensure_storage() -> None:
         defaults = {
             "declaration": DECLARATION_PLACEHOLDER,
             "project_type": PROJECT_TYPES[0],
+            "is_default": "false",
         }
         for col in missing:
             events_df[col] = defaults.get(col, "")
@@ -265,6 +269,7 @@ def create_event(
         "location": location,
         "project_activity": project_activity,
         "project_type": project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0],
+        "is_default": "false",
         "declaration": declaration or DECLARATION_PLACEHOLDER,
         "description": description,
     }
@@ -308,6 +313,16 @@ def update_event_details(
         updated_declaration,
         description,
     ]
+    write_events(events)
+
+
+def set_default_event(event_id: str) -> None:
+    events = load_events()
+    if event_id not in events["event_id"].values:
+        raise ValueError(f"Event '{event_id}' does not exist.")
+    events["is_default"] = events["event_id"].apply(
+        lambda eid: "true" if eid == event_id else "false"
+    )
     write_events(events)
 
 
@@ -395,7 +410,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
                 st.caption(template["description"])
             image_path = BASE_DIR / template.get("image", "")
             if image_path.exists():
-                st.image(image_path, use_container_width=True)
+                st.image(image_path, width=INNO2MARE_LOGO_WIDTH)
             else:
                 st.warning(
                     f"Project image '{template.get('image')}' is missing. "
@@ -595,10 +610,12 @@ def admin_page(
         event_id = event_ids[0]
         st.session_state["active_event_id"] = event_id
 
-    labels_by_id = {
-        row["event_id"]: f"{row['name'] or row['event_id']} - {row['date'] or 'Date TBD'}"
-        for _, row in events_df.iterrows()
-    }
+    labels_by_id = {}
+    for _, row in events_df.iterrows():
+        label = f"{row['name'] or row['event_id']} - {row['date'] or 'Date TBD'}"
+        if str(row.get("is_default", "")).lower() == "true":
+            label += " (default)"
+        labels_by_id[row["event_id"]] = label
     default_index = event_ids.index(event_id)
 
     st.subheader("Education sessions")
@@ -618,6 +635,18 @@ def admin_page(
 
     event_id = selected_for_edit
     active_event = events_df.set_index("event_id").loc[event_id].to_dict()
+    is_default = str(active_event.get("is_default", "")).lower() == "true"
+    if is_default:
+        st.caption("This session is currently the default selection on the sign-in page.")
+    elif st.button("Make this the default session", key=f"make_default_{event_id}"):
+        try:
+            set_default_event(event_id)
+            st.success("Default session updated.")
+            st.session_state["active_event_id"] = event_id
+            st.session_state.pop("editing_event_id", None)
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Unable to update default session: {exc}")
 
     attendees = load_attendees(event_id)
     signins = load_signins(event_id)
@@ -850,18 +879,33 @@ def main() -> None:
         st.error("No education sessions available. Please create one in the admin panel.")
         return
 
-    active_event_id = st.session_state.get("active_event_id")
+    default_event_id = next(
+        (
+            row["event_id"]
+            for row in event_records
+            if str(row.get("is_default", "")).lower() == "true"
+        ),
+        event_records[0]["event_id"],
+    )
+    active_event_id = st.session_state.get("active_event_id", default_event_id)
     if active_event_id not in event_lookup:
-        active_event_id = event_records[0]["event_id"]
-        st.session_state["active_event_id"] = active_event_id
+        active_event_id = default_event_id
+    st.session_state["active_event_id"] = active_event_id
 
     event_ids = [row["event_id"] for row in event_records]
     default_index = event_ids.index(active_event_id)
+
+    def sidebar_label(eid: str) -> str:
+        label = event_lookup[eid].get("name") or eid
+        if str(event_lookup[eid].get("is_default", "")).lower() == "true":
+            label += " (default)"
+        return label
+
     selected_event_id = st.sidebar.selectbox(
         "Education session",
         event_ids,
         index=default_index,
-        format_func=lambda eid: event_lookup[eid].get("name") or eid,
+        format_func=sidebar_label,
         key="event_selector",
     )
     if selected_event_id != active_event_id:
