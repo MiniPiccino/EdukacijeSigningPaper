@@ -18,6 +18,7 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "BASE_DIR", base_dir)
     monkeypatch.setattr(app, "DATA_DIR", data_dir)
     monkeypatch.setattr(app, "EVENTS_DIR", events_dir)
+    monkeypatch.setattr(app, "ASSETS_DIR", base_dir / "assets")
     monkeypatch.setattr(app, "EVENTS_FILE", data_dir / "events.csv")
     monkeypatch.setattr(app, "LEGACY_ATTENDEE_FILE", data_dir / "attendees.csv")
     monkeypatch.setattr(app, "LEGACY_SIGNIN_FILE", data_dir / "signins.csv")
@@ -53,6 +54,7 @@ def test_ensure_storage_creates_default_event():
     assert app.DEFAULT_EVENT_ID in events["event_id"].values
     default_row = events.loc[events["event_id"] == app.DEFAULT_EVENT_ID].iloc[0]
     assert default_row["declaration"] == app.DECLARATION_PLACEHOLDER
+    assert default_row["project_type"] == app.PROJECT_TYPES[0]
 
     default_attendees = read_csv(app.attendee_file(app.DEFAULT_EVENT_ID))
     default_signins = read_csv(app.signin_file(app.DEFAULT_EVENT_ID))
@@ -106,6 +108,7 @@ def test_create_event_generates_unique_directory():
         date="2024-11-01",
         location="Main HQ",
         project_activity="Advanced Module",
+        project_type="GREENPACT",
         declaration="Custom declaration text",
         description="Hands-on workshop",
     )
@@ -116,6 +119,7 @@ def test_create_event_generates_unique_directory():
     created_row = events.loc[events["event_id"] == event_id].iloc[0]
     assert created_row["date"] == "2024-11-01"
     assert created_row["declaration"] == "Custom declaration text"
+    assert created_row["project_type"] == "GREENPACT"
 
 
 def test_update_event_details_overwrites_fields():
@@ -124,6 +128,7 @@ def test_update_event_details_overwrites_fields():
         date="2024-10-01",
         location="City A",
         project_activity="Module A",
+        project_type="EDIH",
         declaration="Declaration A",
         description="Notes A",
     )
@@ -133,6 +138,7 @@ def test_update_event_details_overwrites_fields():
         date="2024-10-02",
         location="City B",
         project_activity="Module B",
+        project_type="EEN",
         declaration="Declaration B",
         description="Notes B",
     )
@@ -141,6 +147,7 @@ def test_update_event_details_overwrites_fields():
     assert row["name"] == "Session B"
     assert row["location"] == "City B"
     assert row["project_activity"] == "Module B"
+    assert row["project_type"] == "EEN"
 
 
 def test_filter_attendees_matches_by_partial_text():

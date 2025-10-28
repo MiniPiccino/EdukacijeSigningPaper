@@ -18,6 +18,7 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 EVENTS_DIR = DATA_DIR / "events"
 EVENTS_FILE = DATA_DIR / "events.csv"
+ASSETS_DIR = BASE_DIR / "assets"
 LEGACY_ATTENDEE_FILE = DATA_DIR / "attendees.csv"
 LEGACY_SIGNIN_FILE = DATA_DIR / "signins.csv"
 LEGACY_SIGNATURE_DIR = DATA_DIR / "signatures"
@@ -28,6 +29,7 @@ EVENT_COLUMNS = [
     "date",
     "location",
     "project_activity",
+    "project_type",
     "declaration",
     "description",
 ]
@@ -48,8 +50,41 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "step")
 DEFAULT_EVENT_ID = "default"
 DEFAULT_EVENT_NAME = "Education Session"
 DECLARATION_PLACEHOLDER = (
-    "Declaration placeholder – update this text in the Admin panel."
+    "NAPOMENA: Potpisom na potpisnoj listi dajem svoju izričitu suglasnost i privolu "
+    "da STEP RI prikuplja, obrađuje i koristi moje osobne podatke u svrhe evidentiranja "
+    "broja polaznika kao dokaz provedene aktivnosti; isti mogu biti ustupljeni trećim "
+    "stranama kao kontrolnom tijelu, ukoliko je aktivnost organizirana u sklopu EU i "
+    "međunarodnih projekata.\n\n"
+    "NOTE: By signing on the signature list I give my consent and approval for STEP RI "
+    "to collect, process and use my personal data for the purposes of documenting the "
+    "number of attendants as evidence of the activity carried out; it may also be "
+    "provided to third parties presenting a control body, if the activity is organized "
+    "as a part of the EU and international projects."
 )
+
+PROJECT_TYPES = ["INNO2MARE", "EDIH", "EEN", "GREENPACT"]
+PROJECT_TEMPLATES = {
+    "INNO2MARE": {
+        "tagline": "INNO2MARE project – 101087348 – funded by Horizon Europe",
+        "description": "Empowering maritime regions through innovation and collaboration.",
+        "image": "assets/eu-funded.png",
+    },
+    "EDIH": {
+        "tagline": "European Digital Innovation Hub activities",
+        "description": "Supporting SMEs on their digital transformation journey.",
+        "image": "assets/eu-funded.png",
+    },
+    "EEN": {
+        "tagline": "Enterprise Europe Network initiatives",
+        "description": "Connecting businesses to grow on an international scale.",
+        "image": "assets/eu-funded.png",
+    },
+    "GREENPACT": {
+        "tagline": "GREENPACT sustainability programme",
+        "description": "Advancing green and sustainable business practices.",
+        "image": "assets/eu-funded.png",
+    },
+}
 
 
 def event_dir(event_id: str) -> Path:
@@ -73,6 +108,10 @@ def slugify(value: str) -> str:
     return base or uuid.uuid4().hex[:8]
 
 
+def get_project_template(project_type: str) -> dict[str, str]:
+    return PROJECT_TEMPLATES.get(project_type, PROJECT_TEMPLATES[PROJECT_TYPES[0]])
+
+
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
     """Return attendees whose name, company, or email contains the query string."""
     cleaned_query = (query or "").strip().lower()
@@ -92,6 +131,7 @@ def ensure_storage() -> None:
     """Create required data folders/files if they do not yet exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
     if not EVENTS_FILE.exists():
         pd.DataFrame(
@@ -102,6 +142,7 @@ def ensure_storage() -> None:
                     "date": "",
                     "location": "",
                     "project_activity": "",
+                    "project_type": PROJECT_TYPES[0],
                     "declaration": DECLARATION_PLACEHOLDER,
                     "description": "",
                 }
@@ -114,6 +155,7 @@ def ensure_storage() -> None:
     if missing:
         defaults = {
             "declaration": DECLARATION_PLACEHOLDER,
+            "project_type": PROJECT_TYPES[0],
         }
         for col in missing:
             events_df[col] = defaults.get(col, "")
@@ -201,6 +243,7 @@ def create_event(
     date: str = "",
     location: str = "",
     project_activity: str = "",
+    project_type: str = PROJECT_TYPES[0],
     declaration: str = "",
     description: str = "",
 ) -> dict[str, str]:
@@ -221,6 +264,7 @@ def create_event(
         "date": date,
         "location": location,
         "project_activity": project_activity,
+        "project_type": project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0],
         "declaration": declaration or DECLARATION_PLACEHOLDER,
         "description": description,
     }
@@ -236,6 +280,7 @@ def update_event_details(
     date: str,
     location: str,
     project_activity: str,
+    project_type: str,
     declaration: str,
     description: str,
 ) -> None:
@@ -245,12 +290,21 @@ def update_event_details(
     updated_declaration = declaration or DECLARATION_PLACEHOLDER
     events.loc[
         events["event_id"] == event_id,
-        ["name", "date", "location", "project_activity", "declaration", "description"],
+        [
+            "name",
+            "date",
+            "location",
+            "project_activity",
+            "project_type",
+            "declaration",
+            "description",
+        ],
     ] = [
         name,
         date,
         location,
         project_activity,
+        project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0],
         updated_declaration,
         description,
     ]
@@ -329,6 +383,21 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     declaration_text = event.get("declaration") or DECLARATION_PLACEHOLDER
     st.markdown("**Declaration**")
     st.info(declaration_text)
+
+    template = get_project_template(event.get("project_type", ""))
+    st.markdown(f"**{template.get('tagline', '')}**")
+    if template.get("description"):
+        st.caption(template["description"])
+
+    image_path = BASE_DIR / template.get("image", "")
+    if image_path.exists():
+        st.image(image_path, caption="Funded by the European Union", use_column_width=False)
+    else:
+        st.warning(
+            f"Project image '{template.get('image')}' is missing. "
+            "Upload the asset under the repository's assets folder."
+        )
+    st.divider()
 
     if attendees.empty:
         st.warning(
@@ -528,6 +597,22 @@ def admin_page(
 
     st.subheader("Session details")
     with st.form("update_event_details"):
+        current_project_type = active_event.get("project_type", PROJECT_TYPES[0])
+        try:
+            default_project_index = PROJECT_TYPES.index(current_project_type)
+        except ValueError:
+            default_project_index = 0
+        updated_project_type = st.selectbox(
+            "Project template*",
+            PROJECT_TYPES,
+            index=default_project_index,
+            help="Select the project this education belongs to. This controls the banner, tagline, and default declaration.",
+        )
+        template_preview = get_project_template(updated_project_type)
+        st.caption(
+            f"Preview: {template_preview.get('tagline', '')} "
+            f"(image: {template_preview.get('image', 'N/A')})"
+        )
         updated_name = st.text_input(
             "Education name*",
             value=active_event.get("name", ""),
@@ -581,6 +666,7 @@ def admin_page(
                     updated_date.strip(),
                     updated_location.strip(),
                     updated_project_activity.strip(),
+                    updated_project_type,
                     updated_declaration.strip(),
                     updated_description.strip(),
                 )
@@ -626,6 +712,16 @@ def admin_page(
         new_event_name = st.text_input(
             "Education name*", placeholder="e.g. Python Basics workshop"
         )
+        new_event_project_type = st.selectbox(
+            "Project template*",
+            PROJECT_TYPES,
+            help="Select the project this education belongs to.",
+        )
+        template_preview_new = get_project_template(new_event_project_type)
+        st.caption(
+            f"Preview: {template_preview_new.get('tagline', '')} "
+            f"(image: {template_preview_new.get('image', 'N/A')})"
+        )
         col_new_date, col_new_location = st.columns(2)
         new_event_date = col_new_date.text_input(
             "Education date*", placeholder="YYYY-MM-DD"
@@ -658,6 +754,7 @@ def admin_page(
             "Education date": new_event_date.strip(),
             "Location": new_event_location.strip(),
             "Project activity": new_event_project_activity.strip(),
+            "Project template": new_event_project_type.strip(),
             "Declaration text": new_event_declaration.strip(),
         }
         missing = [label for label, value in required_values.items() if not value]
@@ -678,6 +775,7 @@ def admin_page(
                         new_event_date.strip(),
                         new_event_location.strip(),
                         new_event_project_activity.strip(),
+                        new_event_project_type.strip(),
                         new_event_declaration.strip(),
                         new_event_description.strip(),
                     )
