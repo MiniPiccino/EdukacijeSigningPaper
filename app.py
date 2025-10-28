@@ -384,19 +384,26 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     st.markdown("**Declaration**")
     st.info(declaration_text)
 
-    template = get_project_template(event.get("project_type", ""))
-    st.markdown(f"**{template.get('tagline', '')}**")
+    project_type = event.get("project_type", "")
+    template = get_project_template(project_type)
+    if project_type == "INNO2MARE" and template.get("tagline"):
+        st.markdown(f"**{template['tagline']}**")
     if template.get("description"):
         st.caption(template["description"])
 
-    image_path = BASE_DIR / template.get("image", "")
-    if image_path.exists():
-        st.image(image_path, caption="Funded by the European Union", use_column_width=False)
-    else:
-        st.warning(
-            f"Project image '{template.get('image')}' is missing. "
-            "Upload the asset under the repository's assets folder."
-        )
+    if project_type == "INNO2MARE":
+        image_path = BASE_DIR / template.get("image", "")
+        if image_path.exists():
+            st.image(
+                image_path,
+                caption="Funded by the European Union",
+                use_column_width=False,
+            )
+        else:
+            st.warning(
+                f"Project image '{template.get('image')}' is missing. "
+                "Upload the asset under the repository's assets folder."
+            )
     st.divider()
 
     if attendees.empty:
@@ -625,86 +632,104 @@ def admin_page(
     with st.expander("Sign-in records", expanded=False):
         st.dataframe(signins)
 
-    st.subheader("Session details")
-    with st.form("update_event_details"):
-        current_project_type = active_event.get("project_type", PROJECT_TYPES[0])
-        try:
-            default_project_index = PROJECT_TYPES.index(current_project_type)
-        except ValueError:
-            default_project_index = 0
-        updated_project_type = st.selectbox(
-            "Project template*",
-            PROJECT_TYPES,
-            index=default_project_index,
-            help="Select the project this education belongs to. This controls the banner, tagline, and default declaration.",
-        )
-        template_preview = get_project_template(updated_project_type)
-        st.caption(
-            f"Preview: {template_preview.get('tagline', '')} "
-            f"(image: {template_preview.get('image', 'N/A')})"
-        )
-        updated_name = st.text_input(
-            "Education name*",
-            value=active_event.get("name", ""),
-            max_chars=200,
-        )
-        col_date, col_location = st.columns(2)
-        updated_date = col_date.text_input(
-            "Education date*",
-            value=active_event.get("date", ""),
-            placeholder="YYYY-MM-DD",
-        )
-        updated_location = col_location.text_input(
-            "Location*",
-            value=active_event.get("location", ""),
-            placeholder="City / venue",
-            max_chars=200,
-        )
-        updated_project_activity = st.text_input(
-            "Project activity*",
-            value=active_event.get("project_activity", ""),
-            max_chars=200,
-        )
-        updated_declaration = st.text_area(
-            "Declaration text*",
-            value=active_event.get("declaration", DECLARATION_PLACEHOLDER),
-            help="Shown on the sign-in form under the Declaration section.",
-            height=120,
-        )
-        updated_description = st.text_area(
-            "Notes (optional)",
-            value=active_event.get("description", ""),
-            height=100,
-        )
-        save_details = st.form_submit_button("Save details")
-    if save_details:
-        required_fields = {
-            "Education name": updated_name.strip(),
-            "Education date": updated_date.strip(),
-            "Location": updated_location.strip(),
-            "Project activity": updated_project_activity.strip(),
-            "Declaration text": updated_declaration.strip(),
-        }
-        missing = [label for label, value in required_fields.items() if not value]
-        if missing:
-            st.error(f"Please fill in: {', '.join(missing)}.")
-        else:
+    editing_event = st.session_state.get("editing_event_id")
+    if editing_event not in event_ids:
+        st.session_state.pop("editing_event_id", None)
+        editing_event = None
+
+    if editing_event == event_id:
+        st.subheader("Session details")
+        with st.form("update_event_details"):
+            current_project_type = active_event.get("project_type", PROJECT_TYPES[0])
             try:
-                update_event_details(
-                    event_id,
-                    updated_name.strip(),
-                    updated_date.strip(),
-                    updated_location.strip(),
-                    updated_project_activity.strip(),
-                    updated_project_type,
-                    updated_declaration.strip(),
-                    updated_description.strip(),
-                )
-                st.success("Session details saved.")
-                st.session_state["active_event_id"] = event_id
-                st.rerun()
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Could not update session details: {exc}")
+                default_project_index = PROJECT_TYPES.index(current_project_type)
+            except ValueError:
+                default_project_index = 0
+            updated_project_type = st.selectbox(
+                "Project template*",
+                PROJECT_TYPES,
+                index=default_project_index,
+                help="Select the project this education belongs to. This controls the banner and template.",
+            )
+            template_preview = get_project_template(updated_project_type)
+            st.caption(
+                f"Preview image: {template_preview.get('image', 'N/A')} — "
+                f"{template_preview.get('tagline', '') or 'No tagline'}"
+            )
+            updated_name = st.text_input(
+                "Education name*",
+                value=active_event.get("name", ""),
+                max_chars=200,
+            )
+            col_date, col_location = st.columns(2)
+            updated_date = col_date.text_input(
+                "Education date*",
+                value=active_event.get("date", ""),
+                placeholder="YYYY-MM-DD",
+            )
+            updated_location = col_location.text_input(
+                "Location*",
+                value=active_event.get("location", ""),
+                placeholder="City / venue",
+                max_chars=200,
+            )
+            updated_project_activity = st.text_input(
+                "Project activity*",
+                value=active_event.get("project_activity", ""),
+                max_chars=200,
+            )
+            updated_declaration = st.text_area(
+                "Declaration text*",
+                value=active_event.get("declaration", DECLARATION_PLACEHOLDER),
+                help="Shown on the sign-in form under the Declaration section.",
+                height=120,
+            )
+            updated_description = st.text_area(
+                "Notes (optional)",
+                value=active_event.get("description", ""),
+                height=100,
+            )
+            col_save, col_cancel = st.columns(2)
+            save_details = col_save.form_submit_button("Save details", type="primary")
+            cancel_edit = col_cancel.form_submit_button("Cancel editing")
+        if save_details:
+            required_fields = {
+                "Education name": updated_name.strip(),
+                "Education date": updated_date.strip(),
+                "Location": updated_location.strip(),
+                "Project activity": updated_project_activity.strip(),
+                "Declaration text": updated_declaration.strip(),
+            }
+            missing = [label for label, value in required_fields.items() if not value]
+            if missing:
+                st.error(f"Please fill in: {', '.join(missing)}.")
+            else:
+                try:
+                    update_event_details(
+                        event_id,
+                        updated_name.strip(),
+                        updated_date.strip(),
+                        updated_location.strip(),
+                        updated_project_activity.strip(),
+                        updated_project_type,
+                        updated_declaration.strip(),
+                        updated_description.strip(),
+                    )
+                    st.success("Session details saved.")
+                    st.session_state["active_event_id"] = event_id
+                    st.session_state.pop("editing_event_id", None)
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not update session details: {exc}")
+        elif cancel_edit:
+            st.session_state.pop("editing_event_id", None)
+            st.info("Editing cancelled.")
+            st.rerun()
+    else:
+        st.info("Select a session and click edit to modify its details.")
+        if st.button("Edit selected session", key=f"edit_{event_id}"):
+            st.session_state["editing_event_id"] = event_id
+            st.rerun()
 
     st.subheader("Replace attendee list")
     uploaded_file = st.file_uploader(
@@ -762,12 +787,6 @@ def admin_page(
         new_event_project_activity = st.text_input(
             "Project activity*", placeholder="Project or activity name"
         )
-        new_event_declaration = st.text_area(
-            "Declaration text*",
-            value=DECLARATION_PLACEHOLDER,
-            help="This text appears on the sign-in form. Replace with your official declaration.",
-            height=120,
-        )
         new_event_description = st.text_area(
             "Notes (optional)",
             placeholder="Internal notes about this education (not shown to attendees).",
@@ -781,7 +800,6 @@ def admin_page(
             "Location": new_event_location.strip(),
             "Project activity": new_event_project_activity.strip(),
             "Project template": new_event_project_type.strip(),
-            "Declaration text": new_event_declaration.strip(),
         }
         missing = [label for label, value in required_values.items() if not value]
 
@@ -795,7 +813,7 @@ def admin_page(
                     new_event_location.strip(),
                     new_event_project_activity.strip(),
                     new_event_project_type.strip(),
-                    new_event_declaration.strip(),
+                    DECLARATION_PLACEHOLDER,
                     new_event_description.strip(),
                 )
                 st.success(
