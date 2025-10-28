@@ -51,6 +51,8 @@ def test_ensure_storage_creates_default_event():
     events = read_csv(app.EVENTS_FILE)
     assert list(events.columns) == app.EVENT_COLUMNS
     assert app.DEFAULT_EVENT_ID in events["event_id"].values
+    default_row = events.loc[events["event_id"] == app.DEFAULT_EVENT_ID].iloc[0]
+    assert default_row["declaration"] == app.DECLARATION_PLACEHOLDER
 
     default_attendees = read_csv(app.attendee_file(app.DEFAULT_EVENT_ID))
     default_signins = read_csv(app.signin_file(app.DEFAULT_EVENT_ID))
@@ -99,10 +101,46 @@ def test_replace_attendees_overwrites_existing_data():
 
 
 def test_create_event_generates_unique_directory():
-    record = app.create_event("Advanced Session", "Hands-on workshop")
+    record = app.create_event(
+        name="Advanced Session",
+        date="2024-11-01",
+        location="Main HQ",
+        project_activity="Advanced Module",
+        declaration="Custom declaration text",
+        description="Hands-on workshop",
+    )
     event_id = record["event_id"]
     assert (app.EVENTS_DIR / event_id).exists()
-    assert read_csv(app.EVENTS_FILE).shape[0] == 2
+    events = read_csv(app.EVENTS_FILE)
+    assert events.shape[0] == 2
+    created_row = events.loc[events["event_id"] == event_id].iloc[0]
+    assert created_row["date"] == "2024-11-01"
+    assert created_row["declaration"] == "Custom declaration text"
+
+
+def test_update_event_details_overwrites_fields():
+    record = app.create_event(
+        name="Session A",
+        date="2024-10-01",
+        location="City A",
+        project_activity="Module A",
+        declaration="Declaration A",
+        description="Notes A",
+    )
+    app.update_event_details(
+        record["event_id"],
+        name="Session B",
+        date="2024-10-02",
+        location="City B",
+        project_activity="Module B",
+        declaration="Declaration B",
+        description="Notes B",
+    )
+    events = read_csv(app.EVENTS_FILE)
+    row = events.loc[events["event_id"] == record["event_id"]].iloc[0]
+    assert row["name"] == "Session B"
+    assert row["location"] == "City B"
+    assert row["project_activity"] == "Module B"
 
 
 def test_filter_attendees_matches_by_partial_text():

@@ -22,7 +22,15 @@ LEGACY_ATTENDEE_FILE = DATA_DIR / "attendees.csv"
 LEGACY_SIGNIN_FILE = DATA_DIR / "signins.csv"
 LEGACY_SIGNATURE_DIR = DATA_DIR / "signatures"
 
-EVENT_COLUMNS = ["event_id", "name", "description"]
+EVENT_COLUMNS = [
+    "event_id",
+    "name",
+    "date",
+    "location",
+    "project_activity",
+    "declaration",
+    "description",
+]
 ATTENDEE_COLUMNS = ["attendee_id", "name", "company", "email"]
 SIGNIN_COLUMNS = [
     "record_id",
@@ -39,6 +47,9 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "step")
 
 DEFAULT_EVENT_ID = "default"
 DEFAULT_EVENT_NAME = "Education Session"
+DECLARATION_PLACEHOLDER = (
+    "Declaration placeholder – update this text in the Admin panel."
+)
 
 
 def event_dir(event_id: str) -> Path:
@@ -88,6 +99,10 @@ def ensure_storage() -> None:
                 {
                     "event_id": DEFAULT_EVENT_ID,
                     "name": DEFAULT_EVENT_NAME,
+                    "date": "",
+                    "location": "",
+                    "project_activity": "",
+                    "declaration": DECLARATION_PLACEHOLDER,
                     "description": "",
                 }
             ],
@@ -97,8 +112,11 @@ def ensure_storage() -> None:
     events_df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
     missing = [col for col in EVENT_COLUMNS if col not in events_df.columns]
     if missing:
+        defaults = {
+            "declaration": DECLARATION_PLACEHOLDER,
+        }
         for col in missing:
-            events_df[col] = ""
+            events_df[col] = defaults.get(col, "")
     events_df = events_df[EVENT_COLUMNS]
     events_df.to_csv(EVENTS_FILE, index=False)
 
@@ -178,7 +196,14 @@ def write_events(df: pd.DataFrame) -> None:
     load_events.clear()
 
 
-def create_event(name: str, description: str = "") -> dict[str, str]:
+def create_event(
+    name: str,
+    date: str = "",
+    location: str = "",
+    project_activity: str = "",
+    declaration: str = "",
+    description: str = "",
+) -> dict[str, str]:
     events = load_events()
     existing_ids = set(events["event_id"])
 
@@ -193,6 +218,10 @@ def create_event(name: str, description: str = "") -> dict[str, str]:
     record = {
         "event_id": event_id,
         "name": name or f"Session {len(events) + 1}",
+        "date": date,
+        "location": location,
+        "project_activity": project_activity,
+        "declaration": declaration or DECLARATION_PLACEHOLDER,
         "description": description,
     }
     updated = pd.concat([events, pd.DataFrame([record])], ignore_index=True)
@@ -201,12 +230,28 @@ def create_event(name: str, description: str = "") -> dict[str, str]:
     return record
 
 
-def update_event_details(event_id: str, name: str, description: str) -> None:
+def update_event_details(
+    event_id: str,
+    name: str,
+    date: str,
+    location: str,
+    project_activity: str,
+    declaration: str,
+    description: str,
+) -> None:
     events = load_events()
     if event_id not in events["event_id"].values:
         raise ValueError(f"Event '{event_id}' does not exist.")
-    events.loc[events["event_id"] == event_id, ["name", "description"]] = [
+    updated_declaration = declaration or DECLARATION_PLACEHOLDER
+    events.loc[
+        events["event_id"] == event_id,
+        ["name", "date", "location", "project_activity", "declaration", "description"],
+    ] = [
         name,
+        date,
+        location,
+        project_activity,
+        updated_declaration,
         description,
     ]
     write_events(events)
@@ -256,15 +301,34 @@ def is_signature_blank(image_data: np.ndarray | None) -> bool:
     return np.all(rgb_pixels == 255)
 
 
-def sign_in_page(event_id: str, event_name: str) -> None:
+def sign_in_page(event_id: str, event: dict[str, str]) -> None:
+    event_name = event.get("name") or event_id
     st.header(f"Education Sign-In — {event_name}")
     attendees = load_attendees(event_id)
 
     recent_success = st.session_state.pop("sign_in_success", None)
-    if recent_success:
+    if isinstance(recent_success, dict):
         st.success(
-            f"Thank you, {recent_success}! You are signed in for {event_name}."
+            f"Thank you, {recent_success.get('name')}! "
+            f"You are signed in for {recent_success.get('event', event_name)}."
         )
+    elif recent_success:
+        st.success(f"Thank you, {recent_success}! You are signed in for {event_name}.")
+
+    detail_col1, detail_col2 = st.columns(2)
+    detail_col1.markdown(
+        f"**Education date:** {event.get('date') or 'To be confirmed'}"
+    )
+    detail_col1.markdown(
+        f"**Location:** {event.get('location') or 'To be confirmed'}"
+    )
+    detail_col2.markdown(
+        f"**Project activity:** {event.get('project_activity') or 'Not specified'}"
+    )
+
+    declaration_text = event.get("declaration") or DECLARATION_PLACEHOLDER
+    st.markdown("**Declaration**")
+    st.info(declaration_text)
 
     if attendees.empty:
         st.warning(
@@ -409,7 +473,10 @@ def sign_in_page(event_id: str, event_name: str) -> None:
         }
         append_signin(event_id, entry)
         st.session_state.pop("selected_attendee", None)
-        st.session_state["sign_in_success"] = entry["name"]
+        st.session_state["sign_in_success"] = {
+            "name": entry["name"],
+            "event": event_name,
+        }
         st.session_state["reset_attendee_search"] = True
         st.session_state["signature_canvas_key"] = (
             f"signature_canvas_{uuid.uuid4().hex}"
@@ -462,22 +529,66 @@ def admin_page(
     st.subheader("Session details")
     with st.form("update_event_details"):
         updated_name = st.text_input(
-            "Education name", value=active_event.get("name", ""), max_chars=200
+            "Education name*",
+            value=active_event.get("name", ""),
+            max_chars=200,
+        )
+        col_date, col_location = st.columns(2)
+        updated_date = col_date.text_input(
+            "Education date*",
+            value=active_event.get("date", ""),
+            placeholder="YYYY-MM-DD",
+        )
+        updated_location = col_location.text_input(
+            "Location*",
+            value=active_event.get("location", ""),
+            placeholder="City / venue",
+            max_chars=200,
+        )
+        updated_project_activity = st.text_input(
+            "Project activity*",
+            value=active_event.get("project_activity", ""),
+            max_chars=200,
+        )
+        updated_declaration = st.text_area(
+            "Declaration text*",
+            value=active_event.get("declaration", DECLARATION_PLACEHOLDER),
+            help="Shown on the sign-in form under the Declaration section.",
+            height=120,
         )
         updated_description = st.text_area(
-            "Description (optional)",
+            "Notes (optional)",
             value=active_event.get("description", ""),
             height=100,
         )
         save_details = st.form_submit_button("Save details")
     if save_details:
-        try:
-            update_event_details(event_id, updated_name.strip(), updated_description.strip())
-            st.success("Session details saved.")
-            st.session_state["active_event_id"] = event_id
-            st.rerun()
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Could not update session details: {exc}")
+        required_fields = {
+            "Education name": updated_name.strip(),
+            "Education date": updated_date.strip(),
+            "Location": updated_location.strip(),
+            "Project activity": updated_project_activity.strip(),
+            "Declaration text": updated_declaration.strip(),
+        }
+        missing = [label for label, value in required_fields.items() if not value]
+        if missing:
+            st.error(f"Please fill in: {', '.join(missing)}.")
+        else:
+            try:
+                update_event_details(
+                    event_id,
+                    updated_name.strip(),
+                    updated_date.strip(),
+                    updated_location.strip(),
+                    updated_project_activity.strip(),
+                    updated_declaration.strip(),
+                    updated_description.strip(),
+                )
+                st.success("Session details saved.")
+                st.session_state["active_event_id"] = event_id
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Could not update session details: {exc}")
 
     st.subheader("Replace attendee list")
     uploaded_file = st.file_uploader(
@@ -512,19 +623,74 @@ def admin_page(
 
     st.subheader("Create new education session")
     with st.form("create_event_form"):
-        new_event_name = st.text_input("New session name", placeholder="e.g. Python Basics")
+        new_event_name = st.text_input(
+            "Education name*", placeholder="e.g. Python Basics workshop"
+        )
+        col_new_date, col_new_location = st.columns(2)
+        new_event_date = col_new_date.text_input(
+            "Education date*", placeholder="YYYY-MM-DD"
+        )
+        new_event_location = col_new_location.text_input(
+            "Location*", placeholder="City / venue"
+        )
+        new_event_project_activity = st.text_input(
+            "Project activity*", placeholder="Project or activity name"
+        )
+        new_event_declaration = st.text_area(
+            "Declaration text*",
+            value=DECLARATION_PLACEHOLDER,
+            help="This text appears on the sign-in form. Replace with your official declaration.",
+            height=120,
+        )
         new_event_description = st.text_area(
-            "Description (optional)", placeholder="Short note about this education."
+            "Notes (optional)",
+            placeholder="Internal notes about this education (not shown to attendees).",
+            height=80,
+        )
+        new_attendees_file = st.file_uploader(
+            "Attendee list CSV* (columns: attendee_id, name, company, email)",
+            type=["csv"],
         )
         create_pressed = st.form_submit_button("Create session")
     if create_pressed:
-        try:
-            record = create_event(new_event_name.strip(), new_event_description.strip())
-            st.success(f"Created new session: {record['name'] or record['event_id']}")
-            st.session_state["active_event_id"] = record["event_id"]
-            st.rerun()
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Could not create session: {exc}")
+        required_values = {
+            "Education name": new_event_name.strip(),
+            "Education date": new_event_date.strip(),
+            "Location": new_event_location.strip(),
+            "Project activity": new_event_project_activity.strip(),
+            "Declaration text": new_event_declaration.strip(),
+        }
+        missing = [label for label, value in required_values.items() if not value]
+        if new_attendees_file is None:
+            missing.append("Attendee list CSV")
+
+        if missing:
+            st.error(f"Please provide: {', '.join(missing)}.")
+        else:
+            try:
+                attendees_df = pd.read_csv(new_attendees_file, dtype=str).fillna("")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Could not read attendee list: {exc}")
+            else:
+                try:
+                    record = create_event(
+                        new_event_name.strip(),
+                        new_event_date.strip(),
+                        new_event_location.strip(),
+                        new_event_project_activity.strip(),
+                        new_event_declaration.strip(),
+                        new_event_description.strip(),
+                    )
+                    replace_attendees(record["event_id"], attendees_df)
+                    st.success(
+                        f"Created new session: {record['name'] or record['event_id']}"
+                    )
+                    st.session_state["active_event_id"] = record["event_id"]
+                    st.session_state["reset_attendee_search"] = True
+                    st.session_state.pop("selected_attendee", None)
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not create session: {exc}")
 
     if st.button("Log out"):
         st.session_state["admin_authenticated"] = False
@@ -567,6 +733,7 @@ def main() -> None:
         st.session_state["active_event_id"] = selected_event_id
         st.session_state.pop("selected_attendee", None)
         st.session_state["reset_attendee_search"] = True
+        st.session_state.pop("signature_canvas_key", None)
     active_event = event_lookup[selected_event_id]
 
     if active_event.get("description"):
@@ -579,7 +746,7 @@ def main() -> None:
         else:
             admin_login_page()
     else:
-        sign_in_page(selected_event_id, active_event.get("name") or selected_event_id)
+        sign_in_page(selected_event_id, active_event)
 
 
 if __name__ == "__main__":
