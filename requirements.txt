@@ -5,3 +5,4 @@ numpy>=1.26
 Pillow>=10.3
 python-docx>=1.1
 openpyxl>=3.1
+docxcompose>=1.4

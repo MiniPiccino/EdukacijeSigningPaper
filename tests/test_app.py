@@ -1,3 +1,5 @@
+import io
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +47,19 @@ def isolated_storage(tmp_path, monkeypatch):
     for idx in range(1, 14):
         table.rows[idx].cells[0].text = str(idx)
     template_doc.save(assets_dir / "SignatureList.docx")
+
+    front_doc = Document()
+    front_doc.add_heading("INNO2MARE Cover", level=1)
+    front_doc.add_paragraph("EDUKACIJA: EDUCATION")
+    info_table = front_doc.add_table(rows=3, cols=2)
+    info_table.autofit = True
+    info_table.rows[0].cells[0].text = "Datum:"
+    info_table.rows[0].cells[1].text = "Date"
+    info_table.rows[1].cells[0].text = "Lokacija:"
+    info_table.rows[1].cells[1].text = "Location"
+    info_table.rows[2].cells[0].text = "Projektna aktivnost:"
+    info_table.rows[2].cells[1].text = "Activity"
+    front_doc.save(assets_dir / "INNO2MARE_FrontPage.docx")
     yield
 
     for cached in (app.load_events, app.load_attendees, app.load_signins):
@@ -274,3 +289,58 @@ def test_generate_signature_document_returns_bytes():
     filename, data = app.generate_signature_document(event_id)
     assert filename.endswith(".docx")
     assert len(data) > 0
+
+
+def test_generate_signature_document_inno2mare_front_page_and_signature_image():
+    event = app.create_event(
+        name="INNO2MARE Session",
+        date="2024-07-15",
+        location="Rijeka Hub",
+        project_activity="Innovation Workshop",
+        project_type="INNO2MARE",
+        declaration="Custom declaration",
+        description="",
+    )
+    event_id = event["event_id"]
+
+    signature_pixels = np.full((12, 12, 4), 255, dtype=np.uint8)
+    signature_pixels[3:9, 3:9, :3] = 0
+    signature_path = app.save_signature_image(event_id, signature_pixels)
+
+    record_id = "sig-001"
+    app.append_signin(
+        event_id,
+        {
+            "record_id": record_id,
+            "attendee_id": "42",
+            "name": "Marina Innovator",
+            "company": "BlueTech",
+            "email": "marina@bluetech.hr",
+            "signed_at": datetime.now(timezone.utc).isoformat(),
+            "signature_file": signature_path,
+        },
+    )
+
+    filename, data = app.generate_signature_document(event_id)
+    assert filename == f"{event_id}-signature-list.docx"
+
+    document = Document(io.BytesIO(data))
+    combined_text_parts = []
+    combined_text_parts.extend(paragraph.text for paragraph in document.paragraphs)
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                combined_text_parts.extend(p.text for p in cell.paragraphs)
+    combined_text = "\n".join(filter(None, combined_text_parts))
+    assert "INNO2MARE Session" in combined_text
+    assert "Rijeka Hub" in combined_text
+    assert "Innovation Workshop" in combined_text
+    assert "<w:br w:type=\"page\"" not in document._element.xml
+
+    four_column_table = next(table for table in document.tables if len(table.rows[0].cells) == 4)
+
+    first_data_row = four_column_table.rows[1]
+    assert first_data_row.cells[1].text == "Marina Innovator"
+    assert first_data_row.cells[2].text == "BlueTech"
+    signature_cell_xml = first_data_row.cells[3]._tc.xml
+    assert "blip" in signature_cell_xml

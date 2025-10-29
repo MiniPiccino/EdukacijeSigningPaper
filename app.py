@@ -6,7 +6,6 @@ import re
 import shutil
 from pathlib import Path
 import io
-from copy import deepcopy
 from datetime import datetime, timezone
 
 import numpy as np
@@ -17,6 +16,7 @@ from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 from docx import Document
 from docx.shared import Inches
+from docxcompose.composer import Composer
 
 
 BASE_DIR = Path(__file__).parent
@@ -154,13 +154,6 @@ def _replace_docx_placeholders(document: Document, mapping: dict[str, str]) -> N
         replace_in_paragraph(paragraph)
     for table in document.tables:
         replace_in_table(table)
-
-
-def _append_document(destination: Document, source: Document) -> None:
-    """Append the body content of the source document to the destination document."""
-    destination_body = destination.element.body
-    for element in source.element.body:
-        destination_body.append(deepcopy(element))
 
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
     """Return attendees whose name, company, or email contains the query string."""
@@ -480,18 +473,21 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
             cell.text = ""
 
     project_type = (event_details.get("project_type") or "").upper()
-    output_document = signature_document
     if project_type == "INNO2MARE":
         front_page_path = ASSETS_DIR / "INNO2MARE_FrontPage.docx"
         if front_page_path.exists():
             front_document = Document(front_page_path)
             _replace_docx_placeholders(front_document, placeholder_context)
-            front_document.add_page_break()
-            _append_document(front_document, signature_document)
-            output_document = front_document
+            composer = Composer(front_document)
+            composer.append(signature_document)
+            buffer = io.BytesIO()
+            composer.save(buffer)
+            buffer.seek(0)
+            filename = f"{event_id}-signature-list.docx"
+            return filename, buffer.getvalue()
 
     buffer = io.BytesIO()
-    output_document.save(buffer)
+    signature_document.save(buffer)
     buffer.seek(0)
     filename = f"{event_id}-signature-list.docx"
     return filename, buffer.getvalue()
