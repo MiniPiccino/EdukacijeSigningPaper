@@ -10,6 +10,7 @@ import io
 
 import numpy as np
 import pandas as pd
+from pandas.errors import EmptyDataError
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
@@ -156,7 +157,28 @@ def ensure_storage() -> None:
             columns=EVENT_COLUMNS,
         ).to_csv(EVENTS_FILE, index=False)
 
-    events_df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    try:
+        events_df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    except EmptyDataError:
+        events_df = pd.DataFrame(columns=EVENT_COLUMNS)
+
+    if events_df.empty:
+        events_df = pd.DataFrame(
+            [
+                {
+                    "event_id": DEFAULT_EVENT_ID,
+                    "name": DEFAULT_EVENT_NAME,
+                    "date": "",
+                    "location": "",
+                    "project_activity": "",
+                    "project_type": PROJECT_TYPES[0],
+                    "is_default": "true",
+                    "declaration": DECLARATION_PLACEHOLDER,
+                    "description": "",
+                }
+            ],
+            columns=EVENT_COLUMNS,
+        )
     missing = [col for col in EVENT_COLUMNS if col not in events_df.columns]
     if missing:
         defaults = {
@@ -205,7 +227,11 @@ def ensure_event_storage(event_id: str) -> None:
 def load_events() -> pd.DataFrame:
     if not EVENTS_FILE.exists():
         ensure_storage()
-    df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    try:
+        df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
+    except EmptyDataError:
+        ensure_storage()
+        df = pd.read_csv(EVENTS_FILE, dtype=str).fillna("")
     missing = [col for col in EVENT_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(f"Events file missing required columns: {', '.join(missing)}")
@@ -217,7 +243,10 @@ def load_attendees(event_id: str) -> pd.DataFrame:
     file_path = attendee_file(event_id)
     if not file_path.exists():
         return pd.DataFrame(columns=ATTENDEE_COLUMNS)
-    df = pd.read_csv(file_path, dtype=str).fillna("")
+    try:
+        df = pd.read_csv(file_path, dtype=str).fillna("")
+    except EmptyDataError:
+        return pd.DataFrame(columns=ATTENDEE_COLUMNS)
     missing = [col for col in ATTENDEE_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(
@@ -231,7 +260,10 @@ def load_signins(event_id: str) -> pd.DataFrame:
     file_path = signin_file(event_id)
     if not file_path.exists():
         return pd.DataFrame(columns=SIGNIN_COLUMNS)
-    df = pd.read_csv(file_path, dtype=str).fillna("")
+    try:
+        df = pd.read_csv(file_path, dtype=str).fillna("")
+    except EmptyDataError:
+        return pd.DataFrame(columns=SIGNIN_COLUMNS)
     missing = [col for col in SIGNIN_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(f"Sign-in CSV missing required columns: {', '.join(missing)}")
