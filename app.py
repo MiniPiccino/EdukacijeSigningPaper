@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 import os
 import re
 import shutil
 from pathlib import Path
 import io
+from copy import deepcopy
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -153,6 +154,13 @@ def _replace_docx_placeholders(document: Document, mapping: dict[str, str]) -> N
         replace_in_paragraph(paragraph)
     for table in document.tables:
         replace_in_table(table)
+
+
+def _append_document(destination: Document, source: Document) -> None:
+    """Append the body content of the source document to the destination document."""
+    destination_body = destination.element.body
+    for element in source.element.body:
+        destination_body.append(deepcopy(element))
 
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
     """Return attendees whose name, company, or email contains the query string."""
@@ -427,23 +435,34 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
             by="signed_at", ascending=True, na_position="last"
         )
 
-    document = Document(template_path)
-
     event_details = get_event_details(event_id)
     event_name = event_details.get("name") or DEFAULT_EVENT_NAME
+    event_date = event_details.get("date") or "To be confirmed"
+    event_location = event_details.get("location") or "To be confirmed"
+    event_activity = event_details.get("project_activity") or "Not specified"
     placeholder_context = {
         "EDUCATION": event_name,
         "Education": event_name,
-        "DATE": event_details.get("date") or "To be confirmed",
-        "Date": event_details.get("date") or "To be confirmed",
-        "LOCATION": event_details.get("location") or "To be confirmed",
-        "Location": event_details.get("location") or "To be confirmed",
-        "ACTIVITY": event_details.get("project_activity") or "Not specified",
-        "Activity": event_details.get("project_activity") or "Not specified",
+        "EDUKACIJA": event_name,
+        "Edukacija": event_name,
+        "DATE": event_date,
+        "Date": event_date,
+        "DATUM": event_date,
+        "Datum": event_date,
+        "LOCATION": event_location,
+        "Location": event_location,
+        "LOKACIJA": event_location,
+        "Lokacija": event_location,
+        "ACTIVITY": event_activity,
+        "Activity": event_activity,
+        "PROJEKTNA AKTIVNOST": event_activity,
+        "Projektna Aktivnost": event_activity,
     }
-    _replace_docx_placeholders(document, placeholder_context)
 
-    table = document.tables[0]
+    signature_document = Document(template_path)
+    _replace_docx_placeholders(signature_document, placeholder_context)
+
+    table = signature_document.tables[0]
 
     header_offset = 1
     required_rows = header_offset + len(signins)
@@ -468,8 +487,19 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         for cell in table.rows[idx].cells:
             cell.text = ""
 
+    project_type = (event_details.get("project_type") or "").upper()
+    output_document = signature_document
+    if project_type == "INNO2MARE":
+        front_page_path = ASSETS_DIR / "INNO2MARE_FrontPage.docx"
+        if front_page_path.exists():
+            front_document = Document(front_page_path)
+            _replace_docx_placeholders(front_document, placeholder_context)
+            front_document.add_page_break()
+            _append_document(front_document, signature_document)
+            output_document = front_document
+
     buffer = io.BytesIO()
-    document.save(buffer)
+    output_document.save(buffer)
     buffer.seek(0)
     filename = f"{event_id}-signature-list.docx"
     return filename, buffer.getvalue()
