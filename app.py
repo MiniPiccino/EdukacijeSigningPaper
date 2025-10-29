@@ -812,11 +812,12 @@ def admin_page(
 
     st.subheader("Replace attendee list")
     uploaded_file = st.file_uploader(
-        "Upload CSV with columns: attendee_id, name, company, email", type=["csv"]
+        "Upload Excel (.xlsx) with columns: attendee_id, name, company, email",
+        type=["xlsx"],
     )
     if uploaded_file is not None:
         try:
-            new_df = pd.read_csv(uploaded_file, dtype=str).fillna("")
+            new_df = pd.read_excel(uploaded_file, dtype=str, engine="openpyxl").fillna("")
             replace_attendees(event_id, new_df)
             st.success("Attendee list updated successfully.")
             st.rerun()
