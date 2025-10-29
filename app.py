@@ -443,20 +443,12 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     placeholder_context = {
         "EDUCATION": event_name,
         "Education": event_name,
-        "EDUKACIJA": event_name,
-        "Edukacija": event_name,
         "DATE": event_date,
         "Date": event_date,
-        "DATUM": event_date,
-        "Datum": event_date,
         "LOCATION": event_location,
         "Location": event_location,
-        "LOKACIJA": event_location,
-        "Lokacija": event_location,
         "ACTIVITY": event_activity,
         "Activity": event_activity,
-        "PROJEKTNA AKTIVNOST": event_activity,
-        "Projektna Aktivnost": event_activity,
     }
 
     signature_document = Document(template_path)
