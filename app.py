@@ -118,6 +118,42 @@ def get_project_template(project_type: str) -> dict[str, str]:
     return PROJECT_TEMPLATES.get(project_type, PROJECT_TEMPLATES[PROJECT_TYPES[0]])
 
 
+def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
+    updated = text
+    for placeholder, value in mapping.items():
+        replacement = value if value is not None else ""
+        updated = updated.replace(placeholder, replacement)
+    return updated
+
+
+def _replace_docx_placeholders(document: Document, mapping: dict[str, str]) -> None:
+    """Replace placeholder text in the provided document using the mapping."""
+
+    def replace_in_paragraph(paragraph) -> None:
+        original_text = paragraph.text
+        updated_text = _replace_placeholders_in_text(original_text, mapping)
+        if updated_text != original_text:
+            runs = paragraph.runs or [paragraph.add_run("")]
+            runs[0].text = updated_text
+            for run in runs[1:]:
+                run.text = ""
+
+    def replace_in_cell(cell) -> None:
+        for paragraph in cell.paragraphs:
+            replace_in_paragraph(paragraph)
+        for inner_table in cell.tables:
+            replace_in_table(inner_table)
+
+    def replace_in_table(table) -> None:
+        for row in table.rows:
+            for cell in row.cells:
+                replace_in_cell(cell)
+
+    for paragraph in document.paragraphs:
+        replace_in_paragraph(paragraph)
+    for table in document.tables:
+        replace_in_table(table)
+
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
     """Return attendees whose name, company, or email contains the query string."""
     cleaned_query = (query or "").strip().lower()
@@ -236,6 +272,15 @@ def load_events() -> pd.DataFrame:
     if missing:
         raise ValueError(f"Events file missing required columns: {', '.join(missing)}")
     return df[EVENT_COLUMNS]
+
+
+def get_event_details(event_id: str) -> dict[str, str]:
+    events = load_events()
+    matches = events[events["event_id"] == event_id]
+    if matches.empty:
+        return {}
+    record = matches.iloc[0]
+    return {key: (record.get(key) or "") for key in EVENT_COLUMNS}
 
 
 @st.cache_data(show_spinner=False)
@@ -383,6 +428,21 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         )
 
     document = Document(template_path)
+
+    event_details = get_event_details(event_id)
+    event_name = event_details.get("name") or DEFAULT_EVENT_NAME
+    placeholder_context = {
+        "EDUCATION": event_name,
+        "Education": event_name,
+        "DATE": event_details.get("date") or "To be confirmed",
+        "Date": event_details.get("date") or "To be confirmed",
+        "LOCATION": event_details.get("location") or "To be confirmed",
+        "Location": event_details.get("location") or "To be confirmed",
+        "ACTIVITY": event_details.get("project_activity") or "Not specified",
+        "Activity": event_details.get("project_activity") or "Not specified",
+    }
+    _replace_docx_placeholders(document, placeholder_context)
+
     table = document.tables[0]
 
     header_offset = 1
