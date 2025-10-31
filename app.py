@@ -74,9 +74,9 @@ PROJECT_TYPES = ["INNO2MARE", "EDIH", "EEN", "GREENPACT"]
 INNO2MARE_LOGO_WIDTH = 220
 PROJECT_TEMPLATES = {
     "INNO2MARE": {
-        "tagline": "INNO2MARE project – 101087348 – funded by Horizon Europe",
+        "tagline": "INNO2MARE project - 101087348 - funded by Horizon Europe",
         "description": "Empowering maritime regions through innovation and collaboration.",
-        "image": "assets/eu-funded.png",
+        "image": "assets/INNO2MARE/eu-funded.png",
     },
     "EDIH": {
         "tagline": "European Digital Innovation Hub activities",
@@ -135,6 +135,15 @@ def backup_artifact(src: Path, category: str, event_id: str | None = None) -> No
 
 def get_project_template(project_type: str) -> dict[str, str]:
     return PROJECT_TEMPLATES.get(project_type, PROJECT_TEMPLATES[PROJECT_TYPES[0]])
+
+
+def project_asset_path(project_type: str, filename: str) -> Path:
+    """Return the asset path for a given project, falling back to the shared assets directory."""
+    project_dir = ASSETS_DIR / project_type
+    candidate = project_dir / filename
+    if candidate.exists():
+        return candidate
+    return ASSETS_DIR / filename
 
 
 def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
@@ -439,9 +448,16 @@ def append_signin(event_id: str, entry: dict[str, str]) -> None:
 
 
 def generate_signature_document(event_id: str) -> tuple[str, bytes]:
-    template_path = ASSETS_DIR / "SignatureList.docx"
+    event_details = get_event_details(event_id)
+    project_type = (event_details.get("project_type") or "").upper()
+
+    template_path = project_asset_path(project_type, "SignatureList.docx")
     if not template_path.exists():
-        raise FileNotFoundError("Signature template not found in assets directory.")
+        fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
+        if fallback_template.exists():
+            template_path = fallback_template
+        else:
+            raise FileNotFoundError("Signature template not found in assets directory.")
 
     signins = load_signins(event_id).copy()
     if signins.empty:
@@ -452,7 +468,6 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
             by="signed_at", ascending=True, na_position="last"
         )
 
-    event_details = get_event_details(event_id)
     event_name = event_details.get("name") or DEFAULT_EVENT_NAME
     event_date = event_details.get("date") or "To be confirmed"
     event_location = event_details.get("location") or "To be confirmed"
@@ -496,9 +511,8 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         for cell in table.rows[idx].cells:
             cell.text = ""
 
-    project_type = (event_details.get("project_type") or "").upper()
     if project_type == "INNO2MARE":
-        front_page_path = ASSETS_DIR / "INNO2MARE_FrontPage.docx"
+        front_page_path = project_asset_path(project_type, "INNO2MARE_FrontPage.docx")
         if front_page_path.exists():
             front_document = Document(front_page_path)
             _replace_docx_placeholders(front_document, placeholder_context)
@@ -973,7 +987,13 @@ def admin_page(
         mime="text/csv",
     )
 
-    template_path = ASSETS_DIR / "SignatureList.docx"
+    project_type = (active_event.get("project_type") or "").upper()
+    template_path = project_asset_path(project_type, "SignatureList.docx")
+    if not template_path.exists():
+        fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
+        if fallback_template.exists():
+            template_path = fallback_template
+
     if template_path.exists():
         if signins.empty:
             st.caption("Collect sign-ins to enable the signature sheet download.")
@@ -992,8 +1012,22 @@ def admin_page(
                 st.error(f"Unable to generate signature sheet: {exc}")
     else:
         st.caption(
-            "SignatureList.docx not found in assets directory. Upload it to enable document export."
+            "SignatureList.docx not found for this project. Upload it under assets to enable document export."
         )
+
+    if project_type == "EEN":
+        een_template = project_asset_path(project_type, "EENPotpisnaLista.xls")
+        if een_template.exists():
+            st.download_button(
+                "Download EEN potpisna lista (XLS)",
+                data=een_template.read_bytes(),
+                file_name=f"{event_id}-EEN-potpisna-lista.xls",
+                mime="application/vnd.ms-excel",
+            )
+        else:
+            st.caption(
+                "EEN potpisna lista template not found. Place it under assets/EEN to enable download."
+            )
 
     if st.button(
         "Clear sign-in records",

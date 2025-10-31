@@ -23,6 +23,11 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "EVENTS_DIR", events_dir)
     assets_dir = base_dir / "assets"
     assets_dir.mkdir()
+    inno_dir = assets_dir / "INNO2MARE"
+    inno_dir.mkdir()
+    een_dir = assets_dir / "EEN"
+    een_dir.mkdir()
+
     monkeypatch.setattr(app, "ASSETS_DIR", assets_dir)
     monkeypatch.setattr(app, "EVENTS_FILE", data_dir / "events.csv")
     monkeypatch.setattr(app, "LEGACY_ATTENDEE_FILE", data_dir / "attendees.csv")
@@ -46,7 +51,7 @@ def isolated_storage(tmp_path, monkeypatch):
     header[3].text = "Signature"
     for idx in range(1, 14):
         table.rows[idx].cells[0].text = str(idx)
-    template_doc.save(assets_dir / "SignatureList.docx")
+    template_doc.save(inno_dir / "SignatureList.docx")
 
     front_doc = Document()
     front_doc.add_heading("INNO2MARE Cover", level=1)
@@ -59,7 +64,9 @@ def isolated_storage(tmp_path, monkeypatch):
     info_table.rows[1].cells[1].text = "Location"
     info_table.rows[2].cells[0].text = "Projektna aktivnost:"
     info_table.rows[2].cells[1].text = "Activity"
-    front_doc.save(assets_dir / "INNO2MARE_FrontPage.docx")
+    front_doc.save(inno_dir / "INNO2MARE_FrontPage.docx")
+
+    (een_dir / "EENPotpisnaLista.xls").write_bytes(b"EEN template placeholder")
     yield
 
     for cached in (app.load_events, app.load_attendees, app.load_signins):
