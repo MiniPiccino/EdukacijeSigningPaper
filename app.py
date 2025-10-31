@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 EVENTS_DIR = DATA_DIR / "events"
 EVENTS_FILE = DATA_DIR / "events.csv"
+BACKUP_DIR = DATA_DIR / "backups"
 ASSETS_DIR = BASE_DIR / "assets"
 LEGACY_ATTENDEE_FILE = DATA_DIR / "attendees.csv"
 LEGACY_SIGNIN_FILE = DATA_DIR / "signins.csv"
@@ -39,13 +40,14 @@ EVENT_COLUMNS = [
     "declaration",
     "description",
 ]
-ATTENDEE_COLUMNS = ["attendee_id", "name", "company", "email"]
+ATTENDEE_COLUMNS = ["attendee_id", "name", "company", "email", "phone"]
 SIGNIN_COLUMNS = [
     "record_id",
     "attendee_id",
     "name",
     "company",
     "email",
+    "phone",
     "signed_at",
     "signature_file",
 ]
@@ -115,6 +117,22 @@ def slugify(value: str) -> str:
     return base or uuid.uuid4().hex[:8]
 
 
+def backup_artifact(src: Path, category: str, event_id: str | None = None) -> None:
+    """Copy the current version of a data file into a timestamped backup."""
+    if not src.exists():
+        return
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target_root = BACKUP_DIR / (event_id or "global") / category
+    backup_name = f"{src.stem}_{timestamp}{src.suffix}"
+
+    try:
+        target_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target_root / backup_name)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Backup failed for {src}: {exc}")
+
+
 def get_project_template(project_type: str) -> dict[str, str]:
     return PROJECT_TEMPLATES.get(project_type, PROJECT_TEMPLATES[PROJECT_TYPES[0]])
 
@@ -156,15 +174,17 @@ def _replace_docx_placeholders(document: Document, mapping: dict[str, str]) -> N
         replace_in_table(table)
 
 def filter_attendees(attendees: pd.DataFrame, query: str) -> pd.DataFrame:
-    """Return attendees whose name, company, or email contains the query string."""
+    """Return attendees whose name, company, email, or phone contains the query string."""
     cleaned_query = (query or "").strip().lower()
     if not cleaned_query:
         return attendees
+    search_columns = [
+        col for col in ["name", "company", "email", "phone"] if col in attendees.columns
+    ]
+    if not search_columns:
+        return attendees
     searchable = (
-        attendees[["name", "company", "email"]]
-        .astype(str)
-        .agg(" ".join, axis=1)
-        .str.lower()
+        attendees[search_columns].astype(str).agg(" ".join, axis=1).str.lower()
     )
     mask = searchable.str.contains(cleaned_query, regex=False)
     return attendees[mask]
@@ -174,6 +194,7 @@ def ensure_storage() -> None:
     """Create required data folders/files if they do not yet exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
     if not EVENTS_FILE.exists():
@@ -295,9 +316,8 @@ def load_attendees(event_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=ATTENDEE_COLUMNS)
     missing = [col for col in ATTENDEE_COLUMNS if col not in df.columns]
     if missing:
-        raise ValueError(
-            f"Attendee CSV missing required columns: {', '.join(missing)}"
-        )
+        for col in missing:
+            df[col] = ""
     return df[ATTENDEE_COLUMNS]
 
 
@@ -312,13 +332,15 @@ def load_signins(event_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=SIGNIN_COLUMNS)
     missing = [col for col in SIGNIN_COLUMNS if col not in df.columns]
     if missing:
-        raise ValueError(f"Sign-in CSV missing required columns: {', '.join(missing)}")
+        for col in missing:
+            df[col] = ""
     return df[SIGNIN_COLUMNS]
 
 
 def write_events(df: pd.DataFrame) -> None:
     df = df.astype(str).fillna("")
     df = df[EVENT_COLUMNS]
+    backup_artifact(EVENTS_FILE, "events")
     df.to_csv(EVENTS_FILE, index=False)
     load_events.clear()
 
@@ -410,7 +432,9 @@ def set_default_event(event_id: str) -> None:
 def append_signin(event_id: str, entry: dict[str, str]) -> None:
     df = load_signins(event_id)
     df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
-    df.to_csv(signin_file(event_id), index=False)
+    target = signin_file(event_id)
+    backup_artifact(target, "signins", event_id)
+    df.to_csv(target, index=False)
     load_signins.clear()
 
 
@@ -500,7 +524,9 @@ def replace_attendees(event_id: str, new_df: pd.DataFrame) -> None:
         raise ValueError(
             f"Uploaded attendee list missing required columns: {', '.join(missing)}"
         )
-    new_df.to_csv(attendee_file(event_id), index=False)
+    target = attendee_file(event_id)
+    backup_artifact(target, "attendees", event_id)
+    new_df.to_csv(target, index=False)
     load_attendees.clear()
 
 
@@ -594,6 +620,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     name = ""
     company = ""
     email = ""
+    phone = ""
 
     if use_existing:
         if st.session_state.pop("reset_attendee_search", False):
@@ -601,7 +628,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
 
         selected_attendee = st.session_state.get("selected_attendee")
         search_query = st.text_input(
-            "Search for your name, company, or email",
+            "Search for your name, company, email, or phone",
             key="attendee_search",
             placeholder="Start typing to filter the list...",
         )
@@ -665,6 +692,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
             name = selected_attendee.get("name", "")
             company = selected_attendee.get("company", "")
             email = selected_attendee.get("email", "")
+            phone = selected_attendee.get("phone", "")
     else:
         st.session_state.pop("selected_attendee", None)
         st.session_state.pop("attendee_search", None)
@@ -672,6 +700,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     name = st.text_input("Full name*", value=name)
     company = st.text_input("Company", value=company)
     email = st.text_input("Email", value=email)
+    phone = st.text_input("Phone", value=phone)
 
     st.markdown("#### Signature")
     st.caption("Please sign inside the box below.")
@@ -716,6 +745,7 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
             "attendee_id": attendee_id,
             "name": name.strip(),
             "company": company.strip(),
+            "phone": phone.strip(),
             "email": email.strip(),
             "signed_at": datetime.now(timezone.utc).isoformat(),
             "signature_file": signature_path,
@@ -922,7 +952,7 @@ def admin_page(
 
     st.subheader("Replace attendee list")
     uploaded_file = st.file_uploader(
-        "Upload Excel (.xlsx) with columns: attendee_id, name, company, email",
+        "Upload Excel (.xlsx) with columns: attendee_id, name, company, email, phone",
         type=["xlsx"],
     )
     if uploaded_file is not None:

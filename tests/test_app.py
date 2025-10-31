@@ -95,7 +95,12 @@ def test_ensure_storage_creates_default_event():
 def test_replace_attendees_validates_required_columns():
     invalid = pd.DataFrame(
         [
-            {"attendee_id": "1", "name": "Jane", "company": "ACME"},
+            {
+                "attendee_id": "1",
+                "name": "Jane",
+                "company": "ACME",
+                "email": "jane@acme.com",
+            },
         ]
     )
     with pytest.raises(ValueError):
@@ -110,6 +115,7 @@ def test_replace_attendees_overwrites_existing_data():
                 "name": "Jane Doe",
                 "company": "ACME",
                 "email": "jane@acme.com",
+                "phone": "+385-91-555-0000",
             }
         ]
     )
@@ -122,6 +128,7 @@ def test_replace_attendees_overwrites_existing_data():
                 "name": "John Smith",
                 "company": "Widgets",
                 "email": "john@widgets.com",
+                "phone": "+385-91-555-0001",
             }
         ]
     )
@@ -207,12 +214,14 @@ def test_filter_attendees_matches_by_partial_text():
                 "name": "Alice Example",
                 "company": "Example Co",
                 "email": "alice@example.com",
+                "phone": "+385-91-555-0101",
             },
             {
                 "attendee_id": "2",
                 "name": "Bob Builder",
                 "company": "Construction Ltd",
                 "email": "bob@build.com",
+                "phone": "+385-91-555-0102",
             },
         ]
     )
@@ -262,6 +271,7 @@ def test_append_signin_appends_to_event_csv():
         "attendee_id": "1",
         "name": "Alice Example",
         "company": "Example Co",
+        "phone": "+385-91-555-0201",
         "email": "alice@example.com",
         "signed_at": "2024-01-01T12:00:00Z",
         "signature_file": f"data/events/{event_id}/signatures/test.png",
@@ -281,6 +291,7 @@ def test_generate_signature_document_returns_bytes():
         "attendee_id": "3",
         "name": "Bob Signed",
         "company": "SignCo",
+        "phone": "+385-91-555-0301",
         "email": "bob@sign.co",
         "signed_at": "2024-05-01T09:00:00Z",
         "signature_file": "",
@@ -315,6 +326,7 @@ def test_generate_signature_document_inno2mare_front_page_and_signature_image():
             "attendee_id": "42",
             "name": "Marina Innovator",
             "company": "BlueTech",
+            "phone": "+385-91-555-0401",
             "email": "marina@bluetech.hr",
             "signed_at": datetime.now(timezone.utc).isoformat(),
             "signature_file": signature_path,
