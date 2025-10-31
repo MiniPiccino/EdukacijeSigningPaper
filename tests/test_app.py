@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from PIL import Image
 from docx import Document
+from openpyxl import load_workbook
 
 import app
 
@@ -307,6 +308,45 @@ def test_generate_signature_document_returns_bytes():
     filename, data = app.generate_signature_document(event_id)
     assert filename.endswith(".docx")
     assert len(data) > 0
+
+
+def test_generate_een_signature_workbook_populates_rows():
+    event = app.create_event(
+        name="EEN Session",
+        date="2024-08-20",
+        location="EEN Hub",
+        project_activity="Networking",
+        project_type="EEN",
+        declaration="Test declaration",
+        description="",
+    )
+    event_id = event["event_id"]
+
+    app.append_signin(
+        event_id,
+        {
+            "record_id": "een-1",
+            "attendee_id": "20",
+            "name": "Ena Example",
+            "company": "EEN Co",
+            "email": "ena@example.com",
+            "phone": "+385-91-555-0501",
+            "signed_at": "2024-08-20T09:00:00Z",
+            "signature_file": "sign.png",
+        },
+    )
+
+    signins = app.load_signins(event_id)
+    filename, payload = app.generate_een_signature_workbook(event_id, event, signins)
+    assert filename.endswith(".xlsx")
+    workbook = load_workbook(io.BytesIO(payload))
+    sheet = workbook.active
+    assert sheet["B1"].value == "EEN Session"
+    assert sheet["A6"].value == "R.br"
+    assert sheet["B7"].value == "Ena Example"
+
+    with pytest.raises(ValueError):
+        app.generate_signature_document(event_id)
 
 
 def test_generate_signature_document_inno2mare_front_page_and_signature_image():

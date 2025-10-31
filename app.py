@@ -146,6 +146,53 @@ def project_asset_path(project_type: str, filename: str) -> Path:
     return ASSETS_DIR / filename
 
 
+def generate_een_signature_workbook(
+    event_id: str, event: dict[str, str], signins: pd.DataFrame
+) -> tuple[str, bytes]:
+    """Generate an EEN-specific signature list as an Excel workbook populated with sign-ins."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Potpisna lista"
+
+    sheet.append(["Naziv edukacije", event.get("name") or event_id])
+    sheet.append(["Datum", event.get("date") or ""])
+    sheet.append(["Lokacija", event.get("location") or ""])
+    sheet.append(["Projektna aktivnost", event.get("project_activity") or ""])
+    sheet.append([])
+
+    headers = [
+        "R.br",
+        "Ime i prezime",
+        "Organizacija",
+        "Email",
+        "Telefon",
+        "Vrijeme prijave",
+        "Datoteka potpisa",
+    ]
+    sheet.append(headers)
+
+    for idx, record in enumerate(signins.to_dict("records"), start=1):
+        sheet.append(
+            [
+                idx,
+                record.get("name", ""),
+                record.get("company", ""),
+                record.get("email", ""),
+                record.get("phone", ""),
+                record.get("signed_at", ""),
+                record.get("signature_file", ""),
+            ]
+        )
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    filename = f"{event_id}-EEN-potpisna-lista.xlsx"
+    return filename, buffer.getvalue()
+
+
 def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
     updated = text
     for placeholder, value in mapping.items():
@@ -450,6 +497,9 @@ def append_signin(event_id: str, entry: dict[str, str]) -> None:
 def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     event_details = get_event_details(event_id)
     project_type = (event_details.get("project_type") or "").upper()
+
+    if project_type == "EEN":
+        raise ValueError("EEN sessions use the Excel signature list generator.")
 
     template_path = project_asset_path(project_type, "SignatureList.docx")
     if not template_path.exists():
@@ -988,17 +1038,22 @@ def admin_page(
     )
 
     project_type = (active_event.get("project_type") or "").upper()
-    template_path = project_asset_path(project_type, "SignatureList.docx")
-    if not template_path.exists():
-        fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
-        if fallback_template.exists():
-            template_path = fallback_template
 
-    if template_path.exists():
-        if signins.empty:
-            st.caption("Collect sign-ins to enable the signature sheet download.")
-        else:
-            try:
+    if signins.empty:
+        st.caption("Collect sign-ins to enable the signature sheet download.")
+    else:
+        try:
+            if project_type == "EEN":
+                xlsx_filename, xlsx_bytes = generate_een_signature_workbook(
+                    event_id, active_event, signins
+                )
+                st.download_button(
+                    "Download EEN potpisna lista (XLSX)",
+                    data=xlsx_bytes,
+                    file_name=xlsx_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
                 doc_filename, doc_bytes = generate_signature_document(event_id)
                 st.download_button(
                     "Download signature sheet (DOCX)",
@@ -1008,26 +1063,10 @@ def admin_page(
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     ),
                 )
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Unable to generate signature sheet: {exc}")
-    else:
-        st.caption(
-            "SignatureList.docx not found for this project. Upload it under assets to enable document export."
-        )
-
-    if project_type == "EEN":
-        een_template = project_asset_path(project_type, "EENPotpisnaLista.xls")
-        if een_template.exists():
-            st.download_button(
-                "Download EEN potpisna lista (XLS)",
-                data=een_template.read_bytes(),
-                file_name=f"{event_id}-EEN-potpisna-lista.xls",
-                mime="application/vnd.ms-excel",
-            )
-        else:
-            st.caption(
-                "EEN potpisna lista template not found. Place it under assets/EEN to enable download."
-            )
+        except FileNotFoundError as exc:
+            st.caption(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Unable to generate signature sheet: {exc}")
 
     if st.button(
         "Clear sign-in records",
