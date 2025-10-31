@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 from PIL import Image
 from docx import Document
-from openpyxl import load_workbook
 
 import app
 
@@ -310,7 +309,7 @@ def test_generate_signature_document_returns_bytes():
     assert len(data) > 0
 
 
-def test_generate_een_signature_workbook_populates_rows():
+def test_generate_een_signature_document_populates_rows():
     event = app.create_event(
         name="EEN Session",
         date="2024-08-20",
@@ -337,13 +336,16 @@ def test_generate_een_signature_workbook_populates_rows():
     )
 
     signins = app.load_signins(event_id)
-    filename, payload = app.generate_een_signature_workbook(event_id, event, signins)
-    assert filename.endswith(".xlsx")
-    workbook = load_workbook(io.BytesIO(payload))
-    sheet = workbook.active
-    assert sheet["B1"].value == "EEN Session"
-    assert sheet["A6"].value == "R.br"
-    assert sheet["B7"].value == "Ena Example"
+    filename, payload = app.generate_een_signature_document(event_id, event, signins)
+    assert filename.endswith(".docx")
+
+    document = Document(io.BytesIO(payload))
+    combined = "\n".join(p.text for p in document.paragraphs)
+    assert "EEN Potpisna lista" in combined
+
+    data_table = document.tables[-1]
+    assert data_table.rows[0].cells[1].text == "Ime i prezime"
+    assert data_table.rows[1].cells[1].text == "Ena Example"
 
     with pytest.raises(ValueError):
         app.generate_signature_document(event_id)

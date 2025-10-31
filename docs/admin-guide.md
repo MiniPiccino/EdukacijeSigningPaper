@@ -32,6 +32,6 @@ Keep the browser open during the remaining steps.
 1. In the admin page, find **Replace attendee list**.
 2. Upload the file prepared in the previous step.
 3. Wait for the confirmation message indicating the list was uploaded successfully.
-4. If the session uses the **EEN** project template, download the **EEN potpisna lista (XLSX)** from the Downloads section when you need the official sheet.
+4. If the session uses the **EEN** project template, download the **EEN potpisna lista (DOCX)** from the Downloads section when you need the official sheet.
 
 The session is now ready for participants to sign in. Repeat this process each time a new education session is scheduled.
