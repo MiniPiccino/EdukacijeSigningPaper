@@ -1,0 +1,5 @@
+event_id,name,date,location,project_activity,project_type,is_default,declaration,description
+default,Education Session,,,,INNO2MARE,true,"NAPOMENA: Potpisom na potpisnoj listi dajem svoju izričitu suglasnost i privolu da STEP RI prikuplja, obrađuje i koristi moje osobne podatke u svrhe evidentiranja broja polaznika kao dokaz provedene aktivnosti; isti mogu biti ustupljeni trećim stranama kao kontrolnom tijelu, ukoliko je aktivnost organizirana u sklopu EU i međunarodnih projekata.
+
+NOTE: By signing on the signature list I give my consent and approval for STEP RI to collect, process and use my personal data for the purposes of documenting the number of attendants as evidence of the activity carried out; it may also be provided to third parties presenting a control body, if the activity is organized as a part of the EU and international projects.",
+session-a,Session A,2024-10-01,City A,Module A,EDIH,false,Declaration A,Notes A

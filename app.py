@@ -517,6 +517,27 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     signature_document = Document(template_path)
     _replace_docx_placeholders(signature_document, placeholder_context)
 
+    translation_map = {
+        "Title": "Naslov",
+        "TITLE": "NASLOV",
+        "Date": "Datum",
+        "DATE": "DATUM",
+        "Name and Surname": "Ime i prezime / Name and surname",
+        "NAME AND SURNAME": "IME I PREZIME / NAME AND SURNAME",
+        "Naziv tvrtke": "Naziv tvrtke / Name of company",
+        "Company": "Naziv tvrtke / Name of company",
+        "Company Name": "Naziv tvrtke / Name of company",
+        "Telephone": "Telefon / Phone number",
+        "Phone": "Telefon / Phone number",
+        "Phone number": "Telefon / Phone number",
+        "Email address": "Email adresa / Email",
+        "Email Address": "Email adresa / Email",
+        "Email": "Email adresa / Email",
+        "Signature": "Potpis / Signature",
+        "SIGNATURE": "POTPIS / SIGNATURE",
+    }
+    _replace_docx_placeholders(signature_document, translation_map)
+
     table = signature_document.tables[0]
 
     header_offset = 1
@@ -552,6 +573,7 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     if front_page_path:
         front_document = Document(front_page_path)
         _replace_docx_placeholders(front_document, placeholder_context)
+        _replace_docx_placeholders(front_document, translation_map)
         composer = Composer(front_document)
         composer.append(signature_document)
         buffer = io.BytesIO()
