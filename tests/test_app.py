@@ -66,6 +66,29 @@ def isolated_storage(tmp_path, monkeypatch):
     info_table.rows[2].cells[1].text = "Activity"
     front_doc.save(inno_dir / "INNO2MARE_FrontPage.docx")
 
+    een_doc = Document()
+    een_table = een_doc.add_table(rows=14, cols=4)
+    een_header = een_table.rows[0].cells
+    een_header[0].text = "#"
+    een_header[1].text = "Name and Surname"
+    een_header[2].text = "Organization"
+    een_header[3].text = "Signature"
+    for idx in range(1, 14):
+        een_table.rows[idx].cells[0].text = str(idx)
+    een_doc.save(een_dir / "EEN_SignatureList.docx")
+
+    een_front = Document()
+    een_front.add_heading("EEN Cover", level=1)
+    een_front.add_paragraph("EDUKACIJA: EDUCATION")
+    een_info = een_front.add_table(rows=3, cols=2)
+    een_info.rows[0].cells[0].text = "Datum:"
+    een_info.rows[0].cells[1].text = "Date"
+    een_info.rows[1].cells[0].text = "Lokacija:"
+    een_info.rows[1].cells[1].text = "Location"
+    een_info.rows[2].cells[0].text = "Projektna aktivnost:"
+    een_info.rows[2].cells[1].text = "Activity"
+    een_front.save(een_dir / "EEN_FrontPage.docx")
+
     (een_dir / "EENPotpisnaLista.xls").write_bytes(b"EEN template placeholder")
     yield
 

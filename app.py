@@ -77,6 +77,8 @@ PROJECT_TEMPLATES = {
         "tagline": "INNO2MARE project - 101087348 - funded by Horizon Europe",
         "description": "Empowering maritime regions through innovation and collaboration.",
         "image": "assets/INNO2MARE/eu-funded.png",
+        "signature_template": "SignatureList.docx",
+        "front_page": "INNO2MARE_FrontPage.docx",
     },
     "EDIH": {
         "tagline": "European Digital Innovation Hub activities",
@@ -87,6 +89,8 @@ PROJECT_TEMPLATES = {
         "tagline": "Enterprise Europe Network initiatives",
         "description": "Connecting businesses to grow on an international scale.",
         "image": "assets/image.png",
+        "signature_template": "EEN_SignatureList.docx",
+        "front_page": "EEN_FrontPage.docx",
     },
     "GREENPACT": {
         "tagline": "GREENPACT sustainability programme",
@@ -144,6 +148,23 @@ def project_asset_path(project_type: str, filename: str) -> Path:
     if candidate.exists():
         return candidate
     return ASSETS_DIR / filename
+
+
+def find_project_asset(project_type: str, *filenames: str) -> Path | None:
+    """Return the first existing asset matching the provided filenames, searching project scope first."""
+    for name in filenames:
+        if not name:
+            continue
+        project_candidate = ASSETS_DIR / project_type / name
+        if project_candidate.exists():
+            return project_candidate
+    for name in filenames:
+        if not name:
+            continue
+        shared_candidate = ASSETS_DIR / name
+        if shared_candidate.exists():
+            return shared_candidate
+    return None
 
 
 def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
@@ -450,9 +471,19 @@ def append_signin(event_id: str, entry: dict[str, str]) -> None:
 def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     event_details = get_event_details(event_id)
     project_type = (event_details.get("project_type") or "").upper()
+    template_info = get_project_template(project_type)
 
-    template_path = project_asset_path(project_type, "SignatureList.docx")
-    if not template_path.exists():
+    template_candidates = [
+        template_info.get("signature_template"),
+        "SignatureList.docx",
+        f"{project_type}_SignatureList.docx",
+        f"{project_type}SignatureList.docx",
+        "PotpisnaLista.docx",
+        f"{project_type}_PotpisnaLista.docx",
+        f"{project_type}PotpisnaLista.docx",
+    ]
+    template_path = find_project_asset(project_type, *template_candidates)
+    if not template_path:
         fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
         if fallback_template.exists():
             template_path = fallback_template
@@ -511,19 +542,23 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         for cell in table.rows[idx].cells:
             cell.text = ""
 
-    front_page_filename = f"{project_type}_FrontPage.docx" if project_type else ""
-    if front_page_filename:
-        front_page_path = project_asset_path(project_type, front_page_filename)
-        if front_page_path.exists():
-            front_document = Document(front_page_path)
-            _replace_docx_placeholders(front_document, placeholder_context)
-            composer = Composer(front_document)
-            composer.append(signature_document)
-            buffer = io.BytesIO()
-            composer.save(buffer)
-            buffer.seek(0)
-            filename = f"{event_id}-signature-list.docx"
-            return filename, buffer.getvalue()
+    front_candidates = [
+        template_info.get("front_page"),
+        f"{project_type}_FrontPage.docx",
+        f"{project_type}FrontPage.docx",
+        "FrontPage.docx",
+    ]
+    front_page_path = find_project_asset(project_type, *front_candidates)
+    if front_page_path:
+        front_document = Document(front_page_path)
+        _replace_docx_placeholders(front_document, placeholder_context)
+        composer = Composer(front_document)
+        composer.append(signature_document)
+        buffer = io.BytesIO()
+        composer.save(buffer)
+        buffer.seek(0)
+        filename = f"{event_id}-signature-list.docx"
+        return filename, buffer.getvalue()
 
     buffer = io.BytesIO()
     signature_document.save(buffer)
