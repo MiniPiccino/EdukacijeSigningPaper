@@ -309,7 +309,7 @@ def test_generate_signature_document_returns_bytes():
     assert len(data) > 0
 
 
-def test_generate_een_signature_document_populates_rows():
+def test_generate_signature_document_handles_een_signatures():
     event = app.create_event(
         name="EEN Session",
         date="2024-08-20",
@@ -321,6 +321,10 @@ def test_generate_een_signature_document_populates_rows():
     )
     event_id = event["event_id"]
 
+    signature_pixels = np.full((12, 12, 4), 255, dtype=np.uint8)
+    signature_pixels[4:8, 4:8, :3] = 0
+    signature_path = app.save_signature_image(event_id, signature_pixels)
+
     app.append_signin(
         event_id,
         {
@@ -331,24 +335,18 @@ def test_generate_een_signature_document_populates_rows():
             "email": "ena@example.com",
             "phone": "+385-91-555-0501",
             "signed_at": "2024-08-20T09:00:00Z",
-            "signature_file": "sign.png",
+            "signature_file": signature_path,
         },
     )
 
-    signins = app.load_signins(event_id)
-    filename, payload = app.generate_een_signature_document(event_id, event, signins)
+    filename, payload = app.generate_signature_document(event_id)
     assert filename.endswith(".docx")
 
     document = Document(io.BytesIO(payload))
-    combined = "\n".join(p.text for p in document.paragraphs)
-    assert "EEN Potpisna lista" in combined
-
-    data_table = document.tables[-1]
-    assert data_table.rows[0].cells[1].text == "Ime i prezime"
+    data_table = document.tables[0]
     assert data_table.rows[1].cells[1].text == "Ena Example"
-
-    with pytest.raises(ValueError):
-        app.generate_signature_document(event_id)
+    signature_cell_xml = data_table.rows[1].cells[3]._tc.xml
+    assert "blip" in signature_cell_xml
 
 
 def test_generate_signature_document_inno2mare_front_page_and_signature_image():

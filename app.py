@@ -146,61 +146,6 @@ def project_asset_path(project_type: str, filename: str) -> Path:
     return ASSETS_DIR / filename
 
 
-def generate_een_signature_document(
-    event_id: str, event: dict[str, str], signins: pd.DataFrame
-) -> tuple[str, bytes]:
-    """Generate an EEN-specific signature list as a Word document populated with sign-ins."""
-    document = Document()
-    document.add_heading("EEN Potpisna lista", level=1)
-
-    info_table = document.add_table(rows=4, cols=2)
-    info_table.style = "Table Grid"
-    info_table.autofit = True
-
-    info_table.cell(0, 0).text = "Naziv edukacije"
-    info_table.cell(0, 1).text = event.get("name") or event_id
-    info_table.cell(1, 0).text = "Datum"
-    info_table.cell(1, 1).text = event.get("date") or ""
-    info_table.cell(2, 0).text = "Lokacija"
-    info_table.cell(2, 1).text = event.get("location") or ""
-    info_table.cell(3, 0).text = "Projektna aktivnost"
-    info_table.cell(3, 1).text = event.get("project_activity") or ""
-
-    document.add_paragraph()
-
-    headers = [
-        "R.br",
-        "Ime i prezime",
-        "Organizacija",
-        "Email",
-        "Telefon",
-        "Vrijeme prijave",
-        "Datoteka potpisa",
-    ]
-    table = document.add_table(rows=1, cols=len(headers))
-    table.style = "Table Grid"
-
-    header_cells = table.rows[0].cells
-    for idx, header in enumerate(headers):
-        header_cells[idx].text = header
-
-    for idx, record in enumerate(signins.to_dict("records"), start=1):
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(idx)
-        row_cells[1].text = record.get("name", "")
-        row_cells[2].text = record.get("company", "")
-        row_cells[3].text = record.get("email", "")
-        row_cells[4].text = record.get("phone", "")
-        row_cells[5].text = record.get("signed_at", "")
-        row_cells[6].text = record.get("signature_file", "")
-
-    buffer = io.BytesIO()
-    document.save(buffer)
-    buffer.seek(0)
-    filename = f"{event_id}-EEN-potpisna-lista.docx"
-    return filename, buffer.getvalue()
-
-
 def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
     updated = text
     for placeholder, value in mapping.items():
@@ -506,9 +451,6 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     event_details = get_event_details(event_id)
     project_type = (event_details.get("project_type") or "").upper()
 
-    if project_type == "EEN":
-        raise ValueError("EEN sessions use the Excel signature list generator.")
-
     template_path = project_asset_path(project_type, "SignatureList.docx")
     if not template_path.exists():
         fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
@@ -569,8 +511,9 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         for cell in table.rows[idx].cells:
             cell.text = ""
 
-    if project_type == "INNO2MARE":
-        front_page_path = project_asset_path(project_type, "INNO2MARE_FrontPage.docx")
+    front_page_filename = f"{project_type}_FrontPage.docx" if project_type else ""
+    if front_page_filename:
+        front_page_path = project_asset_path(project_type, front_page_filename)
         if front_page_path.exists():
             front_document = Document(front_page_path)
             _replace_docx_placeholders(front_document, placeholder_context)
@@ -1051,26 +994,15 @@ def admin_page(
         st.caption("Collect sign-ins to enable the signature sheet download.")
     else:
         try:
-            if project_type == "EEN":
-                doc_filename, doc_bytes = generate_een_signature_document(
-                    event_id, active_event, signins
-                )
-                st.download_button(
-                    "Download EEN potpisna lista (DOCX)",
-                    data=doc_bytes,
-                    file_name=doc_filename,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-            else:
-                doc_filename, doc_bytes = generate_signature_document(event_id)
-                st.download_button(
-                    "Download signature sheet (DOCX)",
-                    data=doc_bytes,
-                    file_name=doc_filename,
-                    mime=(
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    ),
-                )
+            doc_filename, doc_bytes = generate_signature_document(event_id)
+            st.download_button(
+                "Download signature sheet (DOCX)",
+                data=doc_bytes,
+                file_name=doc_filename,
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+            )
         except FileNotFoundError as exc:
             st.caption(str(exc))
         except Exception as exc:  # noqa: BLE001
