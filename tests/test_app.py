@@ -75,7 +75,7 @@ def isolated_storage(tmp_path, monkeypatch):
     een_header[3].text = "Signature"
     for idx in range(1, 14):
         een_table.rows[idx].cells[0].text = str(idx)
-    een_doc.save(een_dir / "EEN_SignatureList.docx")
+    een_doc.save(een_dir / "EENPotpisna lista za seminar.docx")
 
     een_front = Document()
     een_front.add_heading("EEN Cover", level=1)
@@ -366,9 +366,21 @@ def test_generate_signature_document_handles_een_signatures():
     assert filename.endswith(".docx")
 
     document = Document(io.BytesIO(payload))
-    data_table = document.tables[0]
-    assert data_table.rows[1].cells[1].text == "Ena Example"
-    signature_cell_xml = data_table.rows[1].cells[3]._tc.xml
+    data_table = None
+    for table in document.tables:
+        header_text = " ".join(cell.text.strip() for cell in table.rows[0].cells)
+        if "Name" in header_text or "Ime" in header_text:
+            data_table = table
+            break
+    assert data_table is not None
+    name_row = None
+    for row in data_table.rows[1:]:
+        row_text = " ".join(cell.text.strip() for cell in row.cells)
+        if "Ena Example" in row_text:
+            name_row = row
+            break
+    assert name_row is not None
+    signature_cell_xml = name_row.cells[-1]._tc.xml
     assert "blip" in signature_cell_xml
 
 

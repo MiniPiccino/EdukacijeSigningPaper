@@ -89,7 +89,7 @@ PROJECT_TEMPLATES = {
         "tagline": "Enterprise Europe Network initiatives",
         "description": "Connecting businesses to grow on an international scale.",
         "image": "assets/image.png",
-        "signature_template": "EEN_SignatureList.docx",
+        "signature_template": "EENPotpisna lista za seminar.docx",
         "front_page": "EEN_FrontPage.docx",
     },
     "GREENPACT": {
