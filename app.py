@@ -91,6 +91,7 @@ PROJECT_TEMPLATES = {
         "tagline": "European Digital Innovation Hub activities",
         "description": "Supporting SMEs on their digital transformation journey.",
         "image": "assets/image.png",
+        "signature_template": "Potpisna lista.docx",
         "declaration_assets": ["Declaration.txt", "declaration.txt"],
     },
     "EEN": {
@@ -528,7 +529,10 @@ def append_signin(event_id: str, entry: dict[str, str]) -> None:
 
 def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     event_details = get_event_details(event_id)
-    project_type = (event_details.get("project_type") or "").upper()
+    project_type_raw = (event_details.get("project_type") or "").strip()
+    project_type = project_type_raw.upper() if project_type_raw else PROJECT_TYPES[0]
+    if project_type not in PROJECT_TEMPLATES:
+        project_type = PROJECT_TYPES[0]
     template_info = get_project_template(project_type)
 
     template_candidates = [
@@ -542,11 +546,10 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     ]
     template_path = find_project_asset(project_type, *template_candidates)
     if not template_path:
-        fallback_template = ASSETS_DIR / "INNO2MARE" / "SignatureList.docx"
-        if fallback_template.exists():
-            template_path = fallback_template
-        else:
-            raise FileNotFoundError("Signature template not found in assets directory.")
+        raise FileNotFoundError(
+            f"Signature template not found for project '{project_type}'. "
+            f"Upload the DOCX to 'assets/{project_type}/'."
+        )
 
     signins = load_signins(event_id).copy()
     if signins.empty:
