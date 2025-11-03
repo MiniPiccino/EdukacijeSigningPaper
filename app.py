@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 import os
 import re
+import unicodedata
 import shutil
 from pathlib import Path
 import io
@@ -175,6 +176,55 @@ def find_project_asset(project_type: str, *filenames: str) -> Path | None:
         if shared_candidate.exists():
             return shared_candidate
     return None
+
+
+def _normalize_label_key(text: str) -> str:
+    normalized = (
+        unicodedata.normalize("NFKD", text or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    return re.sub(r"[^A-Z]", "", normalized.upper())
+
+
+def _populate_edih_metadata(
+    document: Document, event_name: str, event_location: str, event_date: str
+) -> None:
+    label_values = {
+        "NAZIVDOGADANJA": event_name,
+        "NAZIVDOGADJANJA": event_name,
+        "LOKACIJA": event_location,
+        "DATUM": event_date,
+    }
+    for table in document.tables:
+        for row in table.rows:
+            for idx, cell in enumerate(row.cells):
+                normalized = _normalize_label_key(cell.text)
+                for key, value in label_values.items():
+                    if normalized.startswith(key) and idx + 1 < len(row.cells):
+                        row.cells[idx + 1].text = value
+                        break
+
+
+def _configure_edih_signature_table(table) -> None:
+    required_columns = 5
+    current_columns = len(table.rows[0].cells) if table.rows else 0
+    while current_columns < required_columns:
+        table.add_column(Inches(1.4))
+        current_columns += 1
+
+    headers = [
+        "R.br.",
+        "Ime i prezime / Name and surname",
+        "Naziv tvrtke / Name of company",
+        "Email adresa / Email",
+        "Potpis / Signature",
+    ]
+    if table.rows:
+        header_cells = table.rows[0].cells
+        for idx, text in enumerate(headers):
+            if idx < len(header_cells):
+                header_cells[idx].text = text
 
 
 def get_project_declaration(project_type: str) -> str:
@@ -625,20 +675,52 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     }
     _replace_docx_placeholders(signature_document, translation_map)
 
-    table = signature_document.tables[0]
+    if project_type == "EDIH":
+        _populate_edih_metadata(
+            signature_document, event_name, event_location, event_date
+        )
+
+    signature_table = None
+    for candidate_table in signature_document.tables:
+        if not candidate_table.rows:
+            continue
+        header_text = " ".join(
+            cell.text for cell in candidate_table.rows[0].cells
+        ).upper()
+        if any(keyword in header_text for keyword in ("IME", "SIGNATURE", "POTPIS")):
+            signature_table = candidate_table
+            break
+    if signature_table is None:
+        signature_table = signature_document.tables[0]
+
+    if project_type == "EDIH":
+        _configure_edih_signature_table(signature_table)
 
     header_offset = 1
     required_rows = header_offset + len(signins)
-    while len(table.rows) < required_rows:
-        table.add_row()
+    while len(signature_table.rows) < required_rows:
+        signature_table.add_row()
+
+    signature_col_index = 3
+    email_col_index = None
+    if project_type == "EDIH":
+        email_col_index = 3
+        signature_col_index = 4
 
     for idx, (_, row) in enumerate(signins.iterrows(), start=1):
-        table_row = table.rows[idx]
-        table_row.cells[0].text = str(idx)
-        table_row.cells[1].text = row.get("name", "")
-        table_row.cells[2].text = row.get("company", "")
+        table_row = signature_table.rows[idx]
+        cells = table_row.cells
+        if len(cells) <= signature_col_index:
+            continue
+        cells[0].text = str(idx)
+        if len(cells) > 1:
+            cells[1].text = row.get("name", "")
+        if len(cells) > 2:
+            cells[2].text = row.get("company", "")
+        if email_col_index is not None and len(cells) > email_col_index:
+            cells[email_col_index].text = row.get("email", "")
 
-        signature_cell = table_row.cells[3]
+        signature_cell = cells[signature_col_index]
         signature_cell.text = ""
         signature_path_str = row.get("signature_file", "")
         signature_path = BASE_DIR / signature_path_str if signature_path_str else None
@@ -646,8 +728,8 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
             run = signature_cell.paragraphs[0].add_run()
             run.add_picture(str(signature_path), width=Inches(1.5))
 
-    for idx in range(required_rows, len(table.rows)):
-        for cell in table.rows[idx].cells:
+    for idx in range(required_rows, len(signature_table.rows)):
+        for cell in signature_table.rows[idx].cells:
             cell.text = ""
 
     front_candidates = [
