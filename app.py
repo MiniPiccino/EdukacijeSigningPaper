@@ -16,7 +16,9 @@ import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docxcompose.composer import Composer
 
 
@@ -225,6 +227,32 @@ def _configure_edih_signature_table(table) -> None:
         for idx, text in enumerate(headers):
             if idx < len(header_cells):
                 header_cells[idx].text = text
+
+
+def _get_column_indices(table, keyword_groups: dict[str, tuple[str, ...]]) -> dict[str, int]:
+    if not table.rows:
+        return {}
+    normalized_headers = [
+        _normalize_label_key(cell.text) for cell in table.rows[0].cells
+    ]
+    indices: dict[str, int] = {}
+    for key, group in keyword_groups.items():
+        for idx, header in enumerate(normalized_headers):
+            if any(header.startswith(keyword) for keyword in group):
+                indices[key] = idx
+                break
+    return indices
+
+
+def _prepare_signature_cell(signature_cell) -> None:
+    signature_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    if not signature_cell.paragraphs:
+        paragraph = signature_cell.add_paragraph()
+    else:
+        paragraph = signature_cell.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
 
 
 def get_project_declaration(project_type: str) -> str:
@@ -641,14 +669,14 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
         "TITLE": "NASLOV",
         "“Title”": "„Naslov“",
         "“TITLE”": "„NASLOV“",
-        '"Title"': '"Naslov"',
-        '"TITLE"': '"NASLOV"',
+        '"Title"': "Naslov",
+        '"TITLE"': "NASLOV",
         "Date": "Datum",
         "DATE": "DATUM",
         "“Date”": "„Datum“",
         "“DATE”": "„DATUM“",
-        '"Date"': '"Datum"',
-        '"DATE"': '"DATUM"',
+        '"Date"': "Datum",
+        '"DATE"': "DATUM",
         "Name and Surname": "Ime i prezime / Name and surname",
         "NAME AND SURNAME": "IME I PREZIME / NAME AND SURNAME",
         "Ime i prezime": "Ime i prezime / Name and surname",
@@ -696,32 +724,68 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     if project_type == "EDIH":
         _configure_edih_signature_table(signature_table)
 
+    total_columns = len(signature_table.rows[0].cells) if signature_table.rows else 0
+    column_map = {
+        "index": 0 if total_columns else None,
+        "name": 1 if total_columns > 1 else None,
+        "company": 2 if total_columns > 2 else None,
+        "phone": None,
+        "email": None,
+        "signature": total_columns - 1 if total_columns else None,
+    }
+
+    if project_type == "EDIH":
+        column_map.update({"name": 1, "company": 2, "email": 3, "signature": 4})
+
+    if project_type == "EEN":
+        keyword_map = {
+            "name": ("IMEIPREZIME", "NAMEANDSURNAME"),
+            "company": ("NAZIVTVRTKE", "NAMEOFCOMPANY", "COMPANY"),
+            "phone": ("TELEFON", "PHONE"),
+            "email": ("EMAILADRESA", "EMAILADDRESS", "EMAIL"),
+            "signature": ("POTPIS", "SIGNATURE"),
+        }
+        detected = _get_column_indices(signature_table, keyword_map)
+        column_map.update({key: detected.get(key, column_map.get(key)) for key in keyword_map})
+        if column_map.get("signature") is None and total_columns:
+            column_map["signature"] = total_columns - 1
+
     header_offset = 1
     required_rows = header_offset + len(signins)
     while len(signature_table.rows) < required_rows:
         signature_table.add_row()
 
-    signature_col_index = 3
-    email_col_index = None
-    if project_type == "EDIH":
-        email_col_index = 3
-        signature_col_index = 4
-
     for idx, (_, row) in enumerate(signins.iterrows(), start=1):
         table_row = signature_table.rows[idx]
         cells = table_row.cells
-        if len(cells) <= signature_col_index:
-            continue
-        cells[0].text = str(idx)
-        if len(cells) > 1:
-            cells[1].text = row.get("name", "")
-        if len(cells) > 2:
-            cells[2].text = row.get("company", "")
-        if email_col_index is not None and len(cells) > email_col_index:
-            cells[email_col_index].text = row.get("email", "")
 
-        signature_cell = cells[signature_col_index]
+        index_col = column_map.get("index")
+        if index_col is not None and index_col < len(cells):
+            cells[index_col].text = str(idx)
+
+        name_col = column_map.get("name")
+        if name_col is not None and name_col < len(cells):
+            cells[name_col].text = row.get("name", "")
+
+        company_col = column_map.get("company")
+        if company_col is not None and company_col < len(cells):
+            cells[company_col].text = row.get("company", "")
+
+        phone_col = column_map.get("phone")
+        if phone_col is not None and phone_col < len(cells):
+            cells[phone_col].text = row.get("phone", "")
+
+        email_col = column_map.get("email")
+        if email_col is not None and email_col < len(cells):
+            cells[email_col].text = row.get("email", "")
+
+        signature_col = column_map.get("signature")
+        if signature_col is None or signature_col >= len(cells):
+            continue
+
+        signature_cell = cells[signature_col]
         signature_cell.text = ""
+        _prepare_signature_cell(signature_cell)
         signature_path_str = row.get("signature_file", "")
         signature_path = BASE_DIR / signature_path_str if signature_path_str else None
         if signature_path and signature_path.exists():
