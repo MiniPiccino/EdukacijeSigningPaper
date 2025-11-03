@@ -229,19 +229,29 @@ def _configure_edih_signature_table(table) -> None:
                 header_cells[idx].text = text
 
 
-def _get_column_indices(table, keyword_groups: dict[str, tuple[str, ...]]) -> dict[str, int]:
-    if not table.rows:
-        return {}
-    normalized_headers = [
-        _normalize_label_key(cell.text) for cell in table.rows[0].cells
-    ]
-    indices: dict[str, int] = {}
-    for key, group in keyword_groups.items():
-        for idx, header in enumerate(normalized_headers):
-            if any(header.startswith(keyword) for keyword in group):
-                indices[key] = idx
-                break
-    return indices
+def _get_column_indices(
+    table, keyword_groups: dict[str, tuple[str, ...]]
+) -> tuple[dict[str, int], int | None]:
+    if not table.rows:
+        return {}, None
+    detected: dict[str, int] = {}
+    header_row_index: int | None = None
+    for row_index, row in enumerate(table.rows):
+        normalized_headers = [_normalize_label_key(cell.text) for cell in row.cells]
+        if len(normalized_headers) < 2:
+            continue
+        current: dict[str, int] = {}
+        for key, group in keyword_groups.items():
+            for idx, header in enumerate(normalized_headers):
+                if any(header.startswith(keyword) for keyword in group):
+                    current.setdefault(key, idx)
+                    break
+        if current:
+            detected = current
+            header_row_index = row_index
+            if len(current) == len(keyword_groups):
+                break
+    return detected, header_row_index
 
 
 def _prepare_signature_cell(signature_cell) -> None:
@@ -738,7 +748,11 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     if project_type == "EDIH":
         _configure_edih_signature_table(signature_table)
 
-    total_columns = len(signature_table.rows[0].cells) if signature_table.rows else 0
+    total_columns = (
+        max((len(row.cells) for row in signature_table.rows), default=0)
+        if signature_table.rows
+        else 0
+    )
     column_map = {
         "index": 0 if total_columns else None,
         "name": 1 if total_columns > 1 else None,
@@ -751,23 +765,28 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
     if project_type == "EDIH":
         column_map.update({"name": 1, "company": 2, "email": 3, "signature": 4})
 
-    if project_type == "EEN":
-        keyword_map = {
-            "name": ("IMEIPREZIME", "NAMEANDSURNAME"),
-            "company": ("NAZIVTVRTKE", "NAMEOFCOMPANY", "COMPANY"),
-            "phone": ("TELEFON", "PHONE"),
-            "email": ("EMAILADRESA", "EMAILADDRESS", "EMAIL"),
-            "signature": ("POTPIS", "SIGNATURE"),
-        }
-        detected = _get_column_indices(signature_table, keyword_map)
-        column_map.update({key: detected.get(key, column_map.get(key)) for key in keyword_map})
-        if column_map.get("signature") is None and total_columns:
-            column_map["signature"] = total_columns - 1
-
+    header_row_index: int | None = None
+    if project_type == "EEN":
+        keyword_map = {
+            "name": ("IMEIPREZIME", "NAMEANDSURNAME"),
+            "company": ("NAZIVTVRTKE", "NAMEOFCOMPANY", "COMPANY"),
+            "phone": ("TELEFON", "PHONE"),
+            "email": ("EMAILADRESA", "EMAILADDRESS", "EMAIL"),
+            "signature": ("POTPIS", "SIGNATURE"),
+        }
+        detected, header_row_index = _get_column_indices(signature_table, keyword_map)
+        for key in keyword_map:
+            if key in detected:
+                column_map[key] = detected[key]
+        if column_map.get("signature") is None and total_columns:
+            column_map["signature"] = total_columns - 1
+
     data_row_start = 1
+    if project_type == "EEN" and header_row_index is not None:
+        data_row_start = header_row_index + 1
     if project_type == "EEN":
         index_col = column_map.get("index") or 0
-        for ridx, existing_row in enumerate(signature_table.rows):
+        for ridx, existing_row in enumerate(signature_table.rows[data_row_start:], start=data_row_start):
             cells = existing_row.cells
             if index_col < len(cells) and cells[index_col].text.strip().isdigit():
                 data_row_start = ridx
