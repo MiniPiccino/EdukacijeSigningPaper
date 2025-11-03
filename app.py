@@ -72,6 +72,12 @@ DECLARATION_PLACEHOLDER = (
 
 PROJECT_TYPES = ["INNO2MARE", "EDIH", "EEN", "GREENPACT"]
 INNO2MARE_LOGO_WIDTH = 220
+DEFAULT_DECLARATION_ASSETS = [
+    "Declaration.txt",
+    "declaration.txt",
+    "Declaration.md",
+    "declaration.md",
+]
 PROJECT_TEMPLATES = {
     "INNO2MARE": {
         "tagline": "INNO2MARE project - 101087348 - funded by Horizon Europe",
@@ -79,11 +85,13 @@ PROJECT_TEMPLATES = {
         "image": "assets/INNO2MARE/eu-funded.png",
         "signature_template": "SignatureList.docx",
         "front_page": "INNO2MARE_FrontPage.docx",
+        "declaration_assets": ["Declaration.txt", "declaration.txt"],
     },
     "EDIH": {
         "tagline": "European Digital Innovation Hub activities",
         "description": "Supporting SMEs on their digital transformation journey.",
         "image": "assets/image.png",
+        "declaration_assets": ["Declaration.txt", "declaration.txt"],
     },
     "EEN": {
         "tagline": "Enterprise Europe Network initiatives",
@@ -91,6 +99,7 @@ PROJECT_TEMPLATES = {
         "image": "assets/image.png",
         "signature_template": "EENPotpisna lista za seminar.docx",
         "front_page": "EEN_FrontPage.docx",
+        "declaration_assets": ["Declaration.txt", "declaration.txt"],
     },
     "GREENPACT": {
         "tagline": "GREENPACT sustainability programme",
@@ -167,6 +176,44 @@ def find_project_asset(project_type: str, *filenames: str) -> Path | None:
     return None
 
 
+def get_project_declaration(project_type: str) -> str:
+    """Return the declaration text for the given project, falling back to the shared placeholder."""
+    normalized_type = (project_type or "").strip() or PROJECT_TYPES[0]
+    normalized_type = normalized_type.upper()
+    template = get_project_template(normalized_type)
+    inline_declaration = (template.get("declaration") or "").strip()
+    if inline_declaration:
+        return inline_declaration
+
+    configured_assets = (
+        template.get("declaration_assets") or template.get("declaration_asset") or []
+    )
+    candidate_names: list[str] = []
+    if isinstance(configured_assets, str):
+        candidate_names.append(configured_assets)
+    elif isinstance(configured_assets, (list, tuple, set)):
+        candidate_names.extend(str(name) for name in configured_assets if name)
+
+    candidate_names.extend(
+        [
+            f"{normalized_type}_declaration.txt",
+            f"{normalized_type}_Declaration.txt",
+            f"{normalized_type}-declaration.txt",
+            f"{normalized_type}-Declaration.txt",
+        ]
+    )
+    candidate_names.extend(DEFAULT_DECLARATION_ASSETS)
+
+    asset_path = find_project_asset(normalized_type, *candidate_names)
+    if asset_path and asset_path.exists():
+        try:
+            content = asset_path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            content = ""
+        return content or DECLARATION_PLACEHOLDER
+    return DECLARATION_PLACEHOLDER
+
+
 def _replace_placeholders_in_text(text: str, mapping: dict[str, str]) -> str:
     updated = text
     for placeholder, value in mapping.items():
@@ -238,7 +285,7 @@ def ensure_storage() -> None:
                     "project_activity": "",
                     "project_type": PROJECT_TYPES[0],
                     "is_default": "true",
-                    "declaration": DECLARATION_PLACEHOLDER,
+                    "declaration": get_project_declaration(PROJECT_TYPES[0]),
                     "description": "",
                 }
             ],
@@ -261,7 +308,7 @@ def ensure_storage() -> None:
                     "project_activity": "",
                     "project_type": PROJECT_TYPES[0],
                     "is_default": "true",
-                    "declaration": DECLARATION_PLACEHOLDER,
+                    "declaration": get_project_declaration(PROJECT_TYPES[0]),
                     "description": "",
                 }
             ],
@@ -270,7 +317,7 @@ def ensure_storage() -> None:
     missing = [col for col in EVENT_COLUMNS if col not in events_df.columns]
     if missing:
         defaults = {
-            "declaration": DECLARATION_PLACEHOLDER,
+            "declaration": get_project_declaration(PROJECT_TYPES[0]),
             "project_type": PROJECT_TYPES[0],
             "is_default": "false",
         }
@@ -395,15 +442,21 @@ def create_event(
         suffix += 1
 
     event_id = candidate
+    normalized_project_type = (
+        project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0]
+    )
+    declaration_text = (declaration or "").strip() or get_project_declaration(
+        normalized_project_type
+    )
     record = {
         "event_id": event_id,
         "name": name or f"Session {len(events) + 1}",
         "date": date,
         "location": location,
         "project_activity": project_activity,
-        "project_type": project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0],
+        "project_type": normalized_project_type,
         "is_default": "false",
-        "declaration": declaration or DECLARATION_PLACEHOLDER,
+        "declaration": declaration_text,
         "description": description,
     }
     updated = pd.concat([events, pd.DataFrame([record])], ignore_index=True)
@@ -425,7 +478,12 @@ def update_event_details(
     events = load_events()
     if event_id not in events["event_id"].values:
         raise ValueError(f"Event '{event_id}' does not exist.")
-    updated_declaration = declaration or DECLARATION_PLACEHOLDER
+    normalized_project_type = (
+        project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0]
+    )
+    updated_declaration = (declaration or "").strip() or get_project_declaration(
+        normalized_project_type
+    )
     events.loc[
         events["event_id"] == event_id,
         [
@@ -442,7 +500,7 @@ def update_event_details(
         date,
         location,
         project_activity,
-        project_type if project_type in PROJECT_TYPES else PROJECT_TYPES[0],
+        normalized_project_type,
         updated_declaration,
         description,
     ]
@@ -970,9 +1028,18 @@ def admin_page(
             )
             template_preview = get_project_template(updated_project_type)
             st.caption(
-                f"Preview image: {template_preview.get('image', 'N/A')} — "
+                f"Preview image: {template_preview.get('image', 'N/A')} - "
                 f"{template_preview.get('tagline', '') or 'No tagline'}"
             )
+            template_declaration = get_project_declaration(updated_project_type)
+            with st.expander("Project declaration default", expanded=False):
+                st.text_area(
+                    "Template declaration preview",
+                    template_declaration,
+                    height=140,
+                    disabled=True,
+                    key=f"edit_declaration_preview_{event_id}",
+                )
             updated_name = st.text_input(
                 "Education name*",
                 value=active_event.get("name", ""),
@@ -998,7 +1065,10 @@ def admin_page(
             updated_declaration = st.text_area(
                 "Declaration text*",
                 value=active_event.get("declaration", DECLARATION_PLACEHOLDER),
-                help="Shown on the sign-in form under the Declaration section.",
+                help=(
+                    "Shown on the sign-in form under the Declaration section. "
+                    "Leave blank to restore the default declaration from assets."
+                ),
                 height=120,
             )
             updated_description = st.text_area(
@@ -1115,6 +1185,19 @@ def admin_page(
             f"Preview: {template_preview_new.get('tagline', '')} "
             f"(image: {template_preview_new.get('image', 'N/A')})"
         )
+        default_declaration_preview = get_project_declaration(new_event_project_type)
+        st.caption(
+            "Declaration text will auto-fill from the project assets. "
+            "Edit it later from the session details if needed."
+        )
+        with st.expander("Show declaration that will be used", expanded=False):
+            st.text_area(
+                "Project declaration preview",
+                default_declaration_preview,
+                height=140,
+                disabled=True,
+                key="new_session_declaration_preview",
+            )
         col_new_date, col_new_location = st.columns(2)
         new_event_date = col_new_date.text_input(
             "Education date*", placeholder="YYYY-MM-DD"
@@ -1151,8 +1234,8 @@ def admin_page(
                     new_event_location.strip(),
                     new_event_project_activity.strip(),
                     new_event_project_type.strip(),
-                    DECLARATION_PLACEHOLDER,
-                    new_event_description.strip(),
+                    declaration="",
+                    description=new_event_description.strip(),
                 )
                 st.success(
                     f"Created new session: {record['name'] or record['event_id']}"
