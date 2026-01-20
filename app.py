@@ -732,8 +732,13 @@ def generate_signature_document(event_id: str) -> tuple[str, bytes]:
             signature_document, event_name, event_location, event_date
         )
 
-    signature_table = None
-    for candidate_table in signature_document.tables:
+    if not signature_document.tables:
+        raise ValueError(
+            "Signature template has no tables. Please update the DOCX template to include a signature table."
+        )
+
+    signature_table = None
+    for candidate_table in signature_document.tables:
         if not candidate_table.rows:
             continue
         header_text = " ".join(
