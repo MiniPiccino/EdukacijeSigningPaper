@@ -1,0 +1,15 @@
+[Unit]
+Description=Edukacije Sign-In App (Streamlit)
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/edukacije
+ExecStart=/path/to/edukacije/.venv/bin/streamlit run app.py --server.port 8505 --server.address 0.0.0.0 --server.headless true
+EnvironmentFile=/path/to/edukacije/.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
