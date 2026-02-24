@@ -920,6 +920,10 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
     event_name = event.get("name") or event_id
     st.header(f"Education Sign-In - {event_name}")
     attendees = load_attendees(event_id)
+    if "name" in attendees.columns:
+        attendees = attendees.sort_values(
+            "name", key=lambda s: s.str.lower(), ignore_index=True
+        )
 
     recent_success = st.session_state.pop("sign_in_success", None)
     if isinstance(recent_success, dict):
@@ -1012,19 +1016,12 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
                 selected_attendee = None
                 st.session_state.pop("selected_attendee", None)
 
-        max_results = 12
-        if len(filtered_records) > max_results:
-            st.info(
-                f"Showing first {max_results} matches. Refine your search for more precise results."
-            )
-            filtered_records = filtered_records[:max_results]
-
         if not filtered_records:
             st.warning(
                 "No attendees match that search. Try a different name or switch off the toggle if you are a walk-in."
             )
         else:
-            st.caption("Tap your name to fill in the form automatically.")
+            st.caption("Scroll to find your name and tap it.")
             columns_per_row = 2
             for start in range(0, len(filtered_records), columns_per_row):
                 row_records = filtered_records[start : start + columns_per_row]
@@ -1079,6 +1076,10 @@ def sign_in_page(event_id: str, event: dict[str, str]) -> None:
         drawing_mode="freedraw",
         key=canvas_key,
     )
+
+    if st.button("Signature not working? Tap here to reset it."):
+        st.session_state["signature_canvas_key"] = f"signature_canvas_{uuid.uuid4().hex}"
+        st.rerun()
 
     submitted = st.button("Submit sign-in", type="primary")
 
