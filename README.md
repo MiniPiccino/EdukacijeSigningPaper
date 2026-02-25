@@ -96,17 +96,6 @@ The hook runs `run_server.sh` (with git pull skipped), which reinstalls requirem
 
 ---
 
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ADMIN_USERNAME` | `step` | Admin panel username |
-| `ADMIN_PASSWORD` | `step` | Admin panel password |
-
-Set these in the `.env` file on the server (never commit `.env` to git).
-
----
-
 ## Project Structure
 
 ```
